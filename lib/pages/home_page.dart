@@ -1,7 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../services/auth_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.email});
@@ -13,6 +14,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  final _authService = AuthService();
   late final TextEditingController _displayNameController;
 
   @override
@@ -30,17 +32,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _updateDisplayName(String value) async {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      return;
-    }
-    await Supabase.instance.client.auth.updateUser(
-      UserAttributes(data: {'full_name': trimmed}),
-    );
+    await _authService.updateDisplayName(value);
   }
 
   Future<void> _signOut() async {
-    await Supabase.instance.client.auth.signOut();
+    await _authService.signOut();
   }
 
   @override
@@ -49,8 +45,8 @@ class _HomePageState extends State<HomePage> {
     final userId = user?.id ?? 'inconnu';
     final provider = user?.appMetadata['provider'] ?? 'inconnu';
     final createdAt = user?.createdAt ?? 'inconnu';
-    final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '';
-    final iosClientId = dotenv.env['GOOGLE_IOS_CLIENT_ID'] ?? '';
+    final webClientId = _authService.webClientId;
+    final iosClientId = _authService.iosClientId;
 
     return Scaffold(
       appBar: AppBar(

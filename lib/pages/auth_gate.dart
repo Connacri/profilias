@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:profilias/pages/auth_page.dart';
-import 'package:profilias/pages/home_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'auth_page.dart';
+import 'home_page.dart';
+import 'reset_password_page.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -15,6 +17,9 @@ class AuthGate extends StatelessWidget {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
+        }
+        if (snapshot.data?.event == AuthChangeEvent.passwordRecovery) {
+          return const ResetPasswordPage();
         }
         final session = snapshot.data?.session;
         if (session == null) {

@@ -3,11 +3,10 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config/app_config.dart';
+import '../strings.dart';
+
 class AuthService {
-  static const supabaseRedirectScheme = 'com.profilias.oran.profilias';
-  static const supabaseRedirectHost = 'login-callback';
-  static const supabaseRedirectUrl =
-      '$supabaseRedirectScheme://$supabaseRedirectHost/';
 
   final SupabaseClient _client = Supabase.instance.client;
 
@@ -34,13 +33,13 @@ class AuthService {
       case TargetPlatform.iOS:
         if (_isPlaceholderClientId(webClientId)) {
           throw StateError(
-            'GOOGLE_WEB_CLIENT_ID invalide dans .env (placeholder ou vide).',
+            Strings.invalidWebClientId,
           );
         }
         if (defaultTargetPlatform == TargetPlatform.iOS &&
             _isPlaceholderClientId(iosClientId)) {
           throw StateError(
-            'GOOGLE_IOS_CLIENT_ID invalide dans .env (placeholder ou vide).',
+            Strings.invalidIosClientId,
           );
         }
 
@@ -60,7 +59,7 @@ class AuthService {
         final accessToken = googleAuthorization?.accessToken;
 
         if (idToken == null) {
-          throw StateError('Token Google manquant.');
+          throw StateError(Strings.missingGoogleToken);
         }
 
         await _client.auth.signInWithIdToken(
@@ -74,11 +73,11 @@ class AuthService {
       case TargetPlatform.linux:
         await _client.auth.signInWithOAuth(
           OAuthProvider.google,
-          redirectTo: supabaseRedirectUrl,
+          redirectTo: AppConfig.supabaseRedirectUrl,
         );
         return;
       case TargetPlatform.fuchsia:
-        throw StateError('Plateforme non supportée.');
+        throw StateError(Strings.unsupportedPlatform);
     }
   }
 
@@ -92,11 +91,11 @@ class AuthService {
     );
   }
 
-  Future<void> signUp({
+  Future<AuthResponse> signUp({
     required String email,
     required String password,
   }) async {
-    await _client.auth.signUp(
+    return _client.auth.signUp(
       email: email,
       password: password,
     );
@@ -106,6 +105,21 @@ class AuthService {
     await _client.auth.signOut();
   }
 
+  Future<void> resetPasswordForEmail(String email) async {
+    await _client.auth.resetPasswordForEmail(
+      email,
+      redirectTo: AppConfig.supabaseRedirectUrl,
+    );
+  }
+
+  Future<void> resendSignupEmail(String email) async {
+    await _client.auth.resend(
+      type: OtpType.signup,
+      email: email,
+      emailRedirectTo: AppConfig.supabaseRedirectUrl,
+    );
+  }
+
   Future<void> updateDisplayName(String value) async {
     final trimmed = value.trim();
     if (trimmed.isEmpty) {
@@ -113,6 +127,12 @@ class AuthService {
     }
     await _client.auth.updateUser(
       UserAttributes(data: {'full_name': trimmed}),
+    );
+  }
+
+  Future<void> updatePassword(String newPassword) async {
+    await _client.auth.updateUser(
+      UserAttributes(password: newPassword),
     );
   }
 }

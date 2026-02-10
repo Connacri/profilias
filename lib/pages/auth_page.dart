@@ -1,15 +1,19 @@
+
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-const _supabaseRedirectScheme = 'com.profilias.oran.profilias';
-const _supabaseRedirectHost = 'login-callback';
-const _supabaseRedirectUrl =
-    '$_supabaseRedirectScheme://$_supabaseRedirectHost/';
+import '../config/app_config.dart';
+import '../services/auth_service.dart';
+import '../strings.dart';
+import '../widgets/auth_error_message.dart';
+import 'recover_password_page.dart';
+
+enum AuthMode { signIn, signUp }
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});
@@ -19,16 +23,35 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> {
+  final _authService = AuthService();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
   String? _error;
   String? _lastHelpUrl;
+  bool _awaitingEmailVerification = false;
+  AuthMode _mode = AuthMode.signIn;
+  Timer? _resendTimer;
+  int _resendSecondsLeft = 0;
 
-  bool _isPlaceholderClientId(String value) {
-    return value.isEmpty ||
-        value.contains('YOUR_WEB_CLIENT_ID') ||
-        value.contains('YOUR_IOS_CLIENT_ID');
+  bool get _isWindowsDesktop =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  @override
+  void dispose() {
+    _resendTimer?.cancel();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  void _setMode(AuthMode mode) {
+    setState(() {
+      _mode = mode;
+      _error = null;
+      _lastHelpUrl = null;
+      _awaitingEmailVerification = false;
+    });
   }
 
   void _showError(String message, {bool includeHelp = false}) {
@@ -36,7 +59,7 @@ class _AuthPageState extends State<AuthPage> {
       return;
     }
     final helpText = includeHelp
-        ? 'Voir la doc: https://supabase.com/docs/guides/auth/social-login/auth-google'
+        ? 'Voir la doc: ${AppConfig.supabaseGoogleHelpUrl}'
         : '';
     setState(
       () => _error = includeHelp && helpText.isNotEmpty
@@ -44,8 +67,7 @@ class _AuthPageState extends State<AuthPage> {
           : message,
     );
     if (includeHelp && helpText.isNotEmpty) {
-      _lastHelpUrl =
-          'https://supabase.com/docs/guides/auth/social-login/auth-google';
+      _lastHelpUrl = AppConfig.supabaseGoogleHelpUrl;
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -57,13 +79,39 @@ class _AuthPageState extends State<AuthPage> {
     );
   }
 
+  String? _validatePassword(String value) {
+    final hasMinLength = value.length >= 8;
+    final hasUpper = value.contains(RegExp(r'[A-Z]'));
+    final hasLower = value.contains(RegExp(r'[a-z]'));
+    final hasDigit = value.contains(RegExp(r'\d'));
+    if (hasMinLength && hasUpper && hasLower && hasDigit) {
+      return null;
+    }
+    return Strings.passwordRequirements;
+  }
+
+  void _startResendCooldown() {
+    _resendTimer?.cancel();
+    setState(() => _resendSecondsLeft = 30);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_resendSecondsLeft <= 1) {
+        timer.cancel();
+        setState(() => _resendSecondsLeft = 0);
+      } else {
+        setState(() => _resendSecondsLeft -= 1);
+      }
+    });
+  }
+
   Future<void> _copyGoogleConfig() async {
-    final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '';
-    final iosClientId = dotenv.env['GOOGLE_IOS_CLIENT_ID'] ?? '';
     final payload = [
-      'GOOGLE_WEB_CLIENT_ID=$webClientId',
-      'GOOGLE_IOS_CLIENT_ID=$iosClientId',
-      'SUPABASE_REDIRECT_URL=$_supabaseRedirectUrl',
+      'GOOGLE_WEB_CLIENT_ID=${_authService.webClientId}',
+      'GOOGLE_IOS_CLIENT_ID=${_authService.iosClientId}',
+      'SUPABASE_REDIRECT_URL=${AppConfig.supabaseRedirectUrl}',
     ].join('\n');
 
     await Clipboard.setData(ClipboardData(text: payload));
@@ -72,8 +120,22 @@ class _AuthPageState extends State<AuthPage> {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Config copiée dans le presse-papiers.')),
+      const SnackBar(content: Text(Strings.configCopied)),
     );
+  }
+
+  bool _isLikelyUserNotFound(AuthException e) {
+    final msg = e.message.toLowerCase();
+    return msg.contains('invalid login credentials') ||
+        msg.contains('user not found') ||
+        msg.contains('not found');
+  }
+
+  bool _isUserAlreadyExists(AuthException e) {
+    final msg = e.message.toLowerCase();
+    return msg.contains('already registered') ||
+        msg.contains('already exists') ||
+        msg.contains('user already');
   }
 
   Future<void> _signInWithGoogle() async {
@@ -84,73 +146,13 @@ class _AuthPageState extends State<AuthPage> {
     });
 
     try {
-      if (kIsWeb) {
-        await Supabase.instance.client.auth.signInWithOAuth(
-          OAuthProvider.google,
-        );
-        return;
-      }
-
-      switch (defaultTargetPlatform) {
-        case TargetPlatform.android:
-        case TargetPlatform.iOS:
-          final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '';
-          final iosClientId = dotenv.env['GOOGLE_IOS_CLIENT_ID'] ?? '';
-
-          if (_isPlaceholderClientId(webClientId)) {
-            throw StateError(
-              'GOOGLE_WEB_CLIENT_ID invalide dans .env (placeholder ou vide).',
-            );
-          }
-          if (defaultTargetPlatform == TargetPlatform.iOS &&
-              _isPlaceholderClientId(iosClientId)) {
-            throw StateError(
-              'GOOGLE_IOS_CLIENT_ID invalide dans .env (placeholder ou vide).',
-            );
-          }
-
-          final googleSignIn = GoogleSignIn.instance;
-          await googleSignIn.initialize(
-            clientId: defaultTargetPlatform == TargetPlatform.iOS
-                ? iosClientId
-                : null,
-            serverClientId: webClientId,
-          );
-
-          final googleUser = await googleSignIn.authenticate();
-          final googleAuthorization =
-              await googleUser.authorizationClient.authorizationForScopes([]);
-          final googleAuthentication = googleUser.authentication;
-          final idToken = googleAuthentication.idToken;
-          final accessToken = googleAuthorization?.accessToken;
-
-          if (idToken == null) {
-            throw StateError('Token Google manquant.');
-          }
-
-          await Supabase.instance.client.auth.signInWithIdToken(
-            provider: OAuthProvider.google,
-            idToken: idToken,
-            accessToken: accessToken,
-          );
-          return;
-        case TargetPlatform.macOS:
-        case TargetPlatform.windows:
-        case TargetPlatform.linux:
-          await Supabase.instance.client.auth.signInWithOAuth(
-            OAuthProvider.google,
-            redirectTo: _supabaseRedirectUrl,
-          );
-          return;
-        case TargetPlatform.fuchsia:
-          throw StateError('Plateforme non supportée.');
-      }
+      await _authService.signInWithGoogle();
     } on AuthException catch (e) {
       _showError(e.message, includeHelp: true);
     } on StateError catch (e) {
       _showError(e.message, includeHelp: true);
     } catch (_) {
-      _showError('Erreur Google Sign-In.', includeHelp: true);
+      _showError(Strings.googleError, includeHelp: true);
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -165,14 +167,19 @@ class _AuthPageState extends State<AuthPage> {
       _lastHelpUrl = null;
     });
     try {
-      await Supabase.instance.client.auth.signInWithPassword(
+      await _authService.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
     } on AuthException catch (e) {
-      _showError(e.message);
+      if (_isLikelyUserNotFound(e)) {
+        _setMode(AuthMode.signUp);
+        _showError(Strings.invalidCredentials);
+      } else {
+        _showError(e.message);
+      }
     } catch (_) {
-      _showError('Erreur de connexion.');
+      _showError(Strings.connectionError);
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -181,20 +188,56 @@ class _AuthPageState extends State<AuthPage> {
   }
 
   Future<void> _signUp() async {
+    final validation = _validatePassword(_passwordController.text);
+    if (validation != null) {
+      _showError(validation);
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _error = null;
       _lastHelpUrl = null;
     });
     try {
-      await Supabase.instance.client.auth.signUp(
+      final response = await _authService.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
+      if (response.session == null) {
+        setState(() => _awaitingEmailVerification = true);
+      }
+    } on AuthException catch (e) {
+      if (_isUserAlreadyExists(e)) {
+        _setMode(AuthMode.signIn);
+        _showError(Strings.invalidCredentials);
+      } else {
+        _showError(e.message);
+      }
+    } catch (_) {
+      _showError(Strings.signUpError);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _resendVerificationEmail() async {
+    if (_resendSecondsLeft > 0) {
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      await _authService.resendSignupEmail(_emailController.text.trim());
+      _startResendCooldown();
     } on AuthException catch (e) {
       _showError(e.message);
     } catch (_) {
-      _showError('Erreur lors de la création du compte.');
+      _showError(Strings.connectionError);
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -209,77 +252,130 @@ class _AuthPageState extends State<AuthPage> {
     }
     final uri = Uri.parse(url);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      _showError('Impossible d’ouvrir la documentation.');
+      _showError(Strings.openDocsError);
     }
   }
 
   @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final showGoogle = !_isWindowsDesktop;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Connexion')),
+      appBar: AppBar(title: const Text(Strings.signInTitle)),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            SegmentedButton<AuthMode>(
+              segments: const [
+                ButtonSegment(
+                  value: AuthMode.signIn,
+                  label: Text(Strings.signIn),
+                ),
+                ButtonSegment(
+                  value: AuthMode.signUp,
+                  label: Text(Strings.signUp),
+                ),
+              ],
+              selected: {_mode},
+              onSelectionChanged: (value) => _setMode(value.first),
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(labelText: 'Email'),
+              decoration: const InputDecoration(labelText: Strings.emailLabel),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _passwordController,
               obscureText: true,
-              decoration: const InputDecoration(labelText: 'Mot de passe'),
+              decoration: const InputDecoration(labelText: Strings.passwordLabel),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            if (_mode == AuthMode.signUp)
+              Text(
+                Strings.passwordRequirements,
+                style: Theme.of(context).textTheme.bodySmall,
+                textAlign: TextAlign.center,
+              ),
+            const SizedBox(height: 12),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                child: AuthErrorMessage(_error!),
+              ),
+            if (_awaitingEmailVerification && _mode == AuthMode.signUp)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  children: [
+                    Text(
+                      Strings.awaitingEmailTitle,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      Strings.awaitingEmail,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      Strings.awaitingEmailHint,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 10),
+                    ElevatedButton(
+                      onPressed: _isLoading ? null : _signIn,
+                      child: const Text(Strings.trySignIn),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: _isLoading ? null : _resendVerificationEmail,
+                      child: Text(
+                        _resendSecondsLeft > 0
+                            ? '${Strings.resendEmailIn} ${_resendSecondsLeft}s'
+                            : Strings.resendEmail,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _signIn,
-                  child: const Text('Se connecter'),
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton(
-                  onPressed: _isLoading ? null : _signUp,
-                  child: const Text('Créer un compte'),
-                ),
-              ],
+            ElevatedButton(
+              onPressed: _isLoading
+                  ? null
+                  : (_mode == AuthMode.signIn ? _signIn : _signUp),
+              child: Text(
+                _mode == AuthMode.signIn ? Strings.signIn : Strings.signUp,
+              ),
             ),
             const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _isLoading ? null : _signInWithGoogle,
-              icon: const Icon(Icons.login),
-              label: const Text('Continuer avec Google'),
-            ),
+            if (_mode == AuthMode.signIn)
+              TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RecoverPasswordPage()),
+                ),
+                child: const Text(Strings.forgotPassword),
+              ),
+            if (showGoogle)
+              OutlinedButton.icon(
+                onPressed: _isLoading ? null : _signInWithGoogle,
+                icon: const Icon(Icons.login),
+                label: const Text(Strings.continueWithGoogle),
+              ),
             if (_lastHelpUrl != null)
               TextButton(
                 onPressed: _openHelpUrl,
-                child: const Text('Ouvrir la documentation'),
+                child: const Text(Strings.openDocs),
               ),
             const SizedBox(height: 8),
-            if ((dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '').isNotEmpty ||
-                (dotenv.env['GOOGLE_IOS_CLIENT_ID'] ?? '').isNotEmpty)
+            if (_authService.hasAnyGoogleClientId)
               TextButton(
                 onPressed: _copyGoogleConfig,
-                child: const Text('Copier la config Google'),
+                child: const Text(Strings.copyGoogleConfig),
               ),
           ],
         ),
