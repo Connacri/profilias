@@ -21,7 +21,8 @@ create table if not exists public.profiles (
   height_cm integer,
   education text,
   relationship_status text,
-  social jsonb not null default '[]'::jsonb
+  social jsonb not null default '[]'::jsonb,
+  cni_auto_update_opt_out boolean not null default false
 );
 
 alter table public.profiles

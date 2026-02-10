@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:functions_client/functions_client.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -116,7 +115,6 @@ class AuthService {
       'check-email-exists',
       body: {'email': trimmed},
     );
-    debugPrint('check-email-exists status=${response.status} data=${response.data}');
     if (response.status >= 400) {
       throw AuthException(
         response.data?['error']?.toString() ??

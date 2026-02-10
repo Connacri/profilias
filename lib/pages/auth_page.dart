@@ -224,15 +224,13 @@ class _AuthPageState extends State<AuthPage> {
         );
       }
     } on AuthException catch (e) {
-      debugPrint('SignUp AuthException: ${e.message}');
       if (_isUserAlreadyExists(e)) {
         _setMode(AuthMode.signIn);
         _showError(Strings.switchToSignIn);
       } else {
         _showError(e.message);
       }
-    } catch (e, stack) {
-      debugPrint('SignUp error: $e\n$stack');
+    } catch (_) {
       _showError(Strings.signUpError);
     } finally {
       if (mounted) {

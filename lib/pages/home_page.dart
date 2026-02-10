@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/auth_service.dart';
+import 'scan_card_page.dart';
+import 'cards_list_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.email});
@@ -53,22 +55,41 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final user = Supabase.instance.client.auth.currentUser;
-    final fullName = (user?.userMetadata?['full_name'] as String?)?.trim() ?? '';
+    final fullName =
+        (user?.userMetadata?['full_name'] as String?)?.trim() ?? '';
     final displayName = fullName.isNotEmpty ? fullName : 'Profilias User';
     final isCompact = MediaQuery.of(context).size.width < 720;
     final webClientId = _authService.webClientId;
     final iosClientId = _authService.iosClientId;
     final avatarUrl =
         user?.userMetadata?['avatar_url'] as String? ??
-            'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400';
+        'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400';
     final coverUrl =
         user?.userMetadata?['cover_url'] as String? ??
-            'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1600';
+        'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1600';
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profil'),
         actions: [
+          IconButton(
+            onPressed: () {
+              Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const ScanCardPage()));
+            },
+            icon: const Icon(Icons.document_scanner),
+            tooltip: 'Scanner une carte',
+          ),
+          IconButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CardsListPage()),
+              );
+            },
+            icon: const Icon(Icons.list),
+            tooltip: 'Mes cartes',
+          ),
           TextButton(onPressed: _signOut, child: const Text('Déconnexion')),
         ],
       ),
@@ -99,6 +120,38 @@ class _HomePageState extends State<HomePage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      _SectionCard(
+                        title: 'Actions rapides',
+                        child: Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => const ScanCardPage(),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.document_scanner),
+                              label: const Text('Scanner une carte'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => const CardsListPage(),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.list),
+                              label: const Text('Mes cartes'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       _SectionCard(
                         title: 'À propos',
                         child: Text(
@@ -147,9 +200,9 @@ class _HomePageState extends State<HomePage> {
                                     color: active
                                         ? Theme.of(context).colorScheme.primary
                                         : Theme.of(context)
-                                            .colorScheme
-                                            .onSurface
-                                            .withValues(alpha: 0.2),
+                                              .colorScheme
+                                              .onSurface
+                                              .withValues(alpha: 0.2),
                                     borderRadius: BorderRadius.circular(20),
                                   ),
                                 );
@@ -177,6 +230,30 @@ class _HomePageState extends State<HomePage> {
                                   _displayNameController.text,
                                 ),
                                 child: const Text('Mettre à jour'),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            SwitchListTile(
+                              value: (Supabase.instance.client.auth.currentUser
+                                      ?.userMetadata?['cni_auto_update_opt_out']
+                                      as bool?) ??
+                                  false,
+                              onChanged: (value) async {
+                                final user =
+                                    Supabase.instance.client.auth.currentUser;
+                                if (user == null) return;
+                                await Supabase.instance.client
+                                    .from('profiles')
+                                    .update(
+                                      {'cni_auto_update_opt_out': value},
+                                    )
+                                    .eq('id', user.id);
+                                if (context.mounted) {
+                                  setState(() {});
+                                }
+                              },
+                              title: const Text(
+                                'Ne plus proposer la mise a jour CNI',
                               ),
                             ),
                           ],
@@ -228,10 +305,7 @@ class _ProfileHeader extends StatelessWidget {
         SizedBox(
           height: 260,
           width: double.infinity,
-          child: Image.network(
-            coverUrl,
-            fit: BoxFit.cover,
-          ),
+          child: Image.network(coverUrl, fit: BoxFit.cover),
         ),
         Container(
           height: 260,
@@ -266,15 +340,15 @@ class _ProfileHeader extends StatelessWidget {
                   Text(
                     name,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   Text(
                     email,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.9),
-                        ),
+                      color: Colors.white.withValues(alpha: 0.9),
+                    ),
                   ),
                 ],
               ),
@@ -302,9 +376,9 @@ class _SectionCard extends StatelessWidget {
           children: [
             Text(
               title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 12),
             child,
