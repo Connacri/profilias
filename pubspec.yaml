@@ -1,5 +1,5 @@
 name: profilias
-description: "A new Profilias 2project."
+description: "A new Profilias project."
 
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
@@ -19,6 +19,7 @@ dependencies:
 
   # Supabase
   supabase_flutter: ^2.12.0
+  flutter_dotenv: ^5.2.1
 
   # Local Storage
   shared_preferences: ^2.5.4
