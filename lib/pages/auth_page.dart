@@ -1,6 +1,4 @@
 
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +9,7 @@ import '../config/app_config.dart';
 import '../services/auth_service.dart';
 import '../strings.dart';
 import '../widgets/auth_error_message.dart';
+import 'email_verification_page.dart';
 import 'recover_password_page.dart';
 
 enum AuthMode { signIn, signUp }
@@ -29,17 +28,13 @@ class _AuthPageState extends State<AuthPage> {
   bool _isLoading = false;
   String? _error;
   String? _lastHelpUrl;
-  bool _awaitingEmailVerification = false;
   AuthMode _mode = AuthMode.signIn;
-  Timer? _resendTimer;
-  int _resendSecondsLeft = 0;
 
   bool get _isWindowsDesktop =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 
   @override
   void dispose() {
-    _resendTimer?.cancel();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -50,7 +45,6 @@ class _AuthPageState extends State<AuthPage> {
       _mode = mode;
       _error = null;
       _lastHelpUrl = null;
-      _awaitingEmailVerification = false;
     });
   }
 
@@ -90,21 +84,19 @@ class _AuthPageState extends State<AuthPage> {
     return Strings.passwordRequirements;
   }
 
-  void _startResendCooldown() {
-    _resendTimer?.cancel();
-    setState(() => _resendSecondsLeft = 30);
-    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_resendSecondsLeft <= 1) {
-        timer.cancel();
-        setState(() => _resendSecondsLeft = 0);
-      } else {
-        setState(() => _resendSecondsLeft -= 1);
-      }
-    });
+  _PasswordStrength _passwordStrength(String value) {
+    var score = 0;
+    if (value.length >= 8) score += 1;
+    if (value.contains(RegExp(r'[A-Z]'))) score += 1;
+    if (value.contains(RegExp(r'[a-z]'))) score += 1;
+    if (value.contains(RegExp(r'\d'))) score += 1;
+    if (score <= 1) {
+      return const _PasswordStrength(0.33, Strings.passwordStrengthWeak);
+    }
+    if (score == 2 || score == 3) {
+      return const _PasswordStrength(0.66, Strings.passwordStrengthMedium);
+    }
+    return const _PasswordStrength(1.0, Strings.passwordStrengthStrong);
   }
 
   Future<void> _copyGoogleConfig() async {
@@ -205,7 +197,16 @@ class _AuthPageState extends State<AuthPage> {
         password: _passwordController.text,
       );
       if (response.session == null) {
-        setState(() => _awaitingEmailVerification = true);
+        if (!mounted) {
+          return;
+        }
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => EmailVerificationPage(
+              email: _emailController.text.trim(),
+            ),
+          ),
+        );
       }
     } on AuthException catch (e) {
       if (_isUserAlreadyExists(e)) {
@@ -216,28 +217,6 @@ class _AuthPageState extends State<AuthPage> {
       }
     } catch (_) {
       _showError(Strings.signUpError);
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _resendVerificationEmail() async {
-    if (_resendSecondsLeft > 0) {
-      return;
-    }
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-    try {
-      await _authService.resendSignupEmail(_emailController.text.trim());
-      _startResendCooldown();
-    } on AuthException catch (e) {
-      _showError(e.message);
-    } catch (_) {
-      _showError(Strings.connectionError);
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -259,6 +238,7 @@ class _AuthPageState extends State<AuthPage> {
   @override
   Widget build(BuildContext context) {
     final showGoogle = !_isWindowsDesktop;
+    final strength = _passwordStrength(_passwordController.text);
 
     return Scaffold(
       appBar: AppBar(title: const Text(Strings.signInTitle)),
@@ -295,54 +275,29 @@ class _AuthPageState extends State<AuthPage> {
             ),
             const SizedBox(height: 8),
             if (_mode == AuthMode.signUp)
-              Text(
-                Strings.passwordRequirements,
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center,
+              Column(
+                children: [
+                  Text(
+                    Strings.passwordRequirements,
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: strength.progress),
+                  const SizedBox(height: 4),
+                  Text(
+                    strength.label,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                  _PasswordChecklist(password: _passwordController.text),
+                ],
               ),
             const SizedBox(height: 12),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: AuthErrorMessage(_error!),
-              ),
-            if (_awaitingEmailVerification && _mode == AuthMode.signUp)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Column(
-                  children: [
-                    Text(
-                      Strings.awaitingEmailTitle,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      Strings.awaitingEmail,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      Strings.awaitingEmailHint,
-                      style: Theme.of(context).textTheme.bodySmall,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 10),
-                    ElevatedButton(
-                      onPressed: _isLoading ? null : _signIn,
-                      child: const Text(Strings.trySignIn),
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton(
-                      onPressed: _isLoading ? null : _resendVerificationEmail,
-                      child: Text(
-                        _resendSecondsLeft > 0
-                            ? '${Strings.resendEmailIn} ${_resendSecondsLeft}s'
-                            : Strings.resendEmail,
-                      ),
-                    ),
-                  ],
-                ),
               ),
             ElevatedButton(
               onPressed: _isLoading
@@ -379,6 +334,59 @@ class _AuthPageState extends State<AuthPage> {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PasswordStrength {
+  const _PasswordStrength(this.progress, this.label);
+
+  final double progress;
+  final String label;
+}
+
+class _PasswordChecklist extends StatelessWidget {
+  const _PasswordChecklist({required this.password});
+
+  final String password;
+
+  bool get _hasMinLength => password.length >= 8;
+  bool get _hasUpper => password.contains(RegExp(r'[A-Z]'));
+  bool get _hasLower => password.contains(RegExp(r'[a-z]'));
+  bool get _hasDigit => password.contains(RegExp(r'\d'));
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _ChecklistRow(label: '8+ caractères', ok: _hasMinLength),
+        _ChecklistRow(label: '1 majuscule', ok: _hasUpper),
+        _ChecklistRow(label: '1 minuscule', ok: _hasLower),
+        _ChecklistRow(label: '1 chiffre', ok: _hasDigit),
+      ],
+    );
+  }
+}
+
+class _ChecklistRow extends StatelessWidget {
+  const _ChecklistRow({required this.label, required this.ok});
+
+  final String label;
+  final bool ok;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = ok ? Colors.green : Theme.of(context).colorScheme.error;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(ok ? Icons.check_circle : Icons.cancel, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(color: color)),
+        ],
       ),
     );
   }

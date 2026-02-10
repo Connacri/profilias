@@ -24,6 +24,7 @@ class Strings {
   static const resendEmailIn = 'Renvoyer l’email dans';
   static const resendLimitReached =
       'Limite atteinte pour aujourd’hui. Réessaie demain.';
+  static const openMailbox = 'Ouvrir la boîte mail';
   static const trySignIn = 'Essayer de se connecter';
   static const passwordMismatch = 'Les mots de passe ne correspondent pas.';
   static const passwordRequirements =
