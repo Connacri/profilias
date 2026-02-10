@@ -36,7 +36,12 @@ class Strings {
   static const needAccount = 'Créer un compte';
   static const resetEmailSent = 'Email de récupération envoyé.';
   static const passwordUpdated = 'Mot de passe mis à jour.';
+  static const incorrectPassword = 'Mot de passe incorrect.';
   static const invalidCredentials = 'Identifiants invalides.';
+  static const switchToSignUp =
+      'Compte introuvable ou mot de passe incorrect. Passage en creation de compte.';
+  static const switchToSignIn =
+      'Compte existant. Passage en connexion.';
   static const connectionError = 'Erreur de connexion.';
   static const signUpError = 'Erreur lors de la création du compte.';
   static const openDocsError = 'Impossible d’ouvrir la documentation.';

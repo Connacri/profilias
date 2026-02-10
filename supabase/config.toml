@@ -1,0 +1,2 @@
+[functions.check-email-exists]
+verify_jwt = false

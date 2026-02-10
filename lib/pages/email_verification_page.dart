@@ -120,47 +120,75 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text(Strings.awaitingEmailTitle)),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              Strings.awaitingEmail,
-              style: Theme.of(context).textTheme.bodyMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              Strings.awaitingEmailHint,
-              style: Theme.of(context).textTheme.bodySmall,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: AuthErrorMessage(_error!),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFF7F5F2), Color(0xFFE9F1F0)],
+          ),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxWidth < 520;
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(isCompact ? 18 : 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      Strings.awaitingEmail,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      Strings.awaitingEmailHint,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    if (_error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: AuthErrorMessage(_error!),
+                      ),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed:
+                            _isLoading ? null : () => Navigator.of(context).pop(),
+                        child: const Text(Strings.trySignIn),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: _isLoading ? null : _resendEmail,
+                        child: Text(
+                          _cooldownLeft > 0
+                              ? '${Strings.resendEmailIn} ${_cooldownLeft}s'
+                              : Strings.resendEmail,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextButton(
+                      onPressed: _openMailbox,
+                      child: const Text(Strings.openMailbox),
+                    ),
+                  ],
+                ),
+                  ),
+                ),
               ),
-            ElevatedButton(
-              onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
-              child: const Text(Strings.trySignIn),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton(
-              onPressed: _isLoading ? null : _resendEmail,
-              child: Text(
-                _cooldownLeft > 0
-                    ? '${Strings.resendEmailIn} ${_cooldownLeft}s'
-                    : Strings.resendEmail,
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextButton(
-              onPressed: _openMailbox,
-              child: const Text(Strings.openMailbox),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );

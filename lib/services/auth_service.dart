@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:functions_client/functions_client.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -104,6 +107,45 @@ class AuthService {
     await _client.auth.signOut();
   }
 
+  Future<bool> emailExists(String email) async {
+    final trimmed = email.trim();
+    if (trimmed.isEmpty) {
+      return false;
+    }
+    final response = await _client.functions.invoke(
+      'check-email-exists',
+      body: {'email': trimmed},
+    );
+    debugPrint('check-email-exists status=${response.status} data=${response.data}');
+    if (response.status >= 400) {
+      throw AuthException(
+        response.data?['error']?.toString() ??
+            'Email check failed (${response.status}).',
+      );
+    }
+    final data = response.data;
+    if (data is Map && data['exists'] is bool) {
+      return data['exists'] as bool;
+    }
+    if (data is String && data.isNotEmpty) {
+      final decoded = jsonDecode(data);
+      if (decoded is Map && decoded['exists'] is bool) {
+        return decoded['exists'] as bool;
+      }
+    }
+    return false;
+  }
+
+  Future<bool> safeEmailExists(String email) async {
+    try {
+      return await emailExists(email);
+    } on FunctionException catch (e) {
+      throw AuthException(
+        'Email check failed (${e.status}): ${e.details ?? e.reasonPhrase ?? 'unknown'}',
+      );
+    }
+  }
+
   Future<void> resetPasswordForEmail(String email) async {
     await _client.auth.resetPasswordForEmail(
       email,
@@ -133,5 +175,28 @@ class AuthService {
     await _client.auth.updateUser(
       UserAttributes(password: newPassword),
     );
+  }
+
+  Future<void> ensureProfileCreated(User user) async {
+    final profileId = user.id;
+    final existing = await _client
+        .from('profiles')
+        .select('id')
+        .eq('id', profileId)
+        .maybeSingle();
+    if (existing != null) {
+      return;
+    }
+    final payload = <String, dynamic>{
+      'id': profileId,
+      'email': user.email,
+      if (user.userMetadata?['full_name'] != null)
+        'full_name': user.userMetadata?['full_name'],
+      if (user.userMetadata?['avatar_url'] != null)
+        'photoProfil_url': user.userMetadata?['avatar_url'],
+      if (user.userMetadata?['cover_url'] != null)
+        'cover_url': user.userMetadata?['cover_url'],
+    };
+    await _client.from('profiles').insert(payload);
   }
 }

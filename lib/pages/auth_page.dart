@@ -118,9 +118,7 @@ class _AuthPageState extends State<AuthPage> {
 
   bool _isLikelyUserNotFound(AuthException e) {
     final msg = e.message.toLowerCase();
-    return msg.contains('invalid login credentials') ||
-        msg.contains('user not found') ||
-        msg.contains('not found');
+    return msg.contains('user not found');
   }
 
   bool _isUserAlreadyExists(AuthException e) {
@@ -159,14 +157,24 @@ class _AuthPageState extends State<AuthPage> {
       _lastHelpUrl = null;
     });
     try {
+      final exists =
+          await _authService.safeEmailExists(_emailController.text.trim());
+      if (!exists) {
+        _setMode(AuthMode.signUp);
+        _showError(Strings.switchToSignUp);
+        return;
+      }
       await _authService.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
     } on AuthException catch (e) {
+      final msg = e.message.toLowerCase();
       if (_isLikelyUserNotFound(e)) {
         _setMode(AuthMode.signUp);
-        _showError(Strings.invalidCredentials);
+        _showError(Strings.switchToSignUp);
+      } else if (msg.contains('invalid login credentials')) {
+        _showError(Strings.incorrectPassword);
       } else {
         _showError(e.message);
       }
@@ -192,6 +200,13 @@ class _AuthPageState extends State<AuthPage> {
       _lastHelpUrl = null;
     });
     try {
+      final exists =
+          await _authService.safeEmailExists(_emailController.text.trim());
+      if (exists) {
+        _setMode(AuthMode.signIn);
+        _showError(Strings.switchToSignIn);
+        return;
+      }
       final response = await _authService.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -209,13 +224,15 @@ class _AuthPageState extends State<AuthPage> {
         );
       }
     } on AuthException catch (e) {
+      debugPrint('SignUp AuthException: ${e.message}');
       if (_isUserAlreadyExists(e)) {
         _setMode(AuthMode.signIn);
-        _showError(Strings.invalidCredentials);
+        _showError(Strings.switchToSignIn);
       } else {
         _showError(e.message);
       }
-    } catch (_) {
+    } catch (e, stack) {
+      debugPrint('SignUp error: $e\n$stack');
       _showError(Strings.signUpError);
     } finally {
       if (mounted) {
@@ -239,101 +256,88 @@ class _AuthPageState extends State<AuthPage> {
   Widget build(BuildContext context) {
     final showGoogle = !_isWindowsDesktop;
     final strength = _passwordStrength(_passwordController.text);
-
     return Scaffold(
-      appBar: AppBar(title: const Text(Strings.signInTitle)),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SegmentedButton<AuthMode>(
-              segments: const [
-                ButtonSegment(
-                  value: AuthMode.signIn,
-                  label: Text(Strings.signIn),
-                ),
-                ButtonSegment(
-                  value: AuthMode.signUp,
-                  label: Text(Strings.signUp),
-                ),
-              ],
-              selected: {_mode},
-              onSelectionChanged: (value) => _setMode(value.first),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(labelText: Strings.emailLabel),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: Strings.passwordLabel),
-            ),
-            const SizedBox(height: 8),
-            if (_mode == AuthMode.signUp)
-              Column(
-                children: [
-                  Text(
-                    Strings.passwordRequirements,
-                    style: Theme.of(context).textTheme.bodySmall,
-                    textAlign: TextAlign.center,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 900;
+          return Stack(
+            children: [
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFFF7F5F2),
+                      Color(0xFFE9F1F0),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  LinearProgressIndicator(value: strength.progress),
-                  const SizedBox(height: 4),
-                  Text(
-                    strength.label,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  _PasswordChecklist(password: _passwordController.text),
-                ],
-              ),
-            const SizedBox(height: 12),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: AuthErrorMessage(_error!),
-              ),
-            ElevatedButton(
-              onPressed: _isLoading
-                  ? null
-                  : (_mode == AuthMode.signIn ? _signIn : _signUp),
-              child: Text(
-                _mode == AuthMode.signIn ? Strings.signIn : Strings.signUp,
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (_mode == AuthMode.signIn)
-              TextButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const RecoverPasswordPage()),
                 ),
-                child: const Text(Strings.forgotPassword),
               ),
-            if (showGoogle)
-              OutlinedButton.icon(
-                onPressed: _isLoading ? null : _signInWithGoogle,
-                icon: const Icon(Icons.login),
-                label: const Text(Strings.continueWithGoogle),
+              Positioned(
+                right: -120,
+                top: -80,
+                child: _GlowBlob(
+                  size: 280,
+                  color: const Color(0xFF00A6A6).withValues(alpha: 0.15),
+                ),
               ),
-            if (_lastHelpUrl != null)
-              TextButton(
-                onPressed: _openHelpUrl,
-                child: const Text(Strings.openDocs),
+              Positioned(
+                left: -100,
+                bottom: -120,
+                child: _GlowBlob(
+                  size: 320,
+                  color: const Color(0xFF1B3C59).withValues(alpha: 0.12),
+                ),
               ),
-            const SizedBox(height: 8),
-            if (_authService.hasAnyGoogleClientId)
-              TextButton(
-                onPressed: _copyGoogleConfig,
-                child: const Text(Strings.copyGoogleConfig),
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 980),
+                  child: Padding(
+                    padding: EdgeInsets.all(isWide ? 20 : 12),
+                    child: Row(
+                      children: [
+                        if (isWide)
+                          Expanded(
+                            flex: 5,
+                            child: _BrandPanel(
+                              onDocs: _lastHelpUrl != null ? _openHelpUrl : null,
+                            ),
+                          ),
+                        if (isWide) const SizedBox(width: 24),
+                        Expanded(
+                          flex: 6,
+                          child: _AuthCard(
+                            mode: _mode,
+                            isLoading: _isLoading,
+                            showGoogle: showGoogle,
+                            strength: strength,
+                            error: _error,
+                            hasGoogleConfig: _authService.hasAnyGoogleClientId,
+                            onCopyConfig: _copyGoogleConfig,
+                            onDocs: _lastHelpUrl != null ? _openHelpUrl : null,
+                            onModeChange: _setMode,
+                            onSignIn: _signIn,
+                            onSignUp: _signUp,
+                            onGoogle: _signInWithGoogle,
+                            onForgot: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const RecoverPasswordPage(),
+                              ),
+                            ),
+                            emailController: _emailController,
+                            passwordController: _passwordController,
+                            isCompact: !isWide,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -387,6 +391,288 @@ class _ChecklistRow extends StatelessWidget {
           const SizedBox(width: 6),
           Text(label, style: TextStyle(color: color)),
         ],
+      ),
+    );
+  }
+}
+
+class _AuthCard extends StatelessWidget {
+  const _AuthCard({
+    required this.mode,
+    required this.isLoading,
+    required this.showGoogle,
+    required this.strength,
+    required this.error,
+    required this.hasGoogleConfig,
+    required this.onCopyConfig,
+    required this.onDocs,
+    required this.onModeChange,
+    required this.onSignIn,
+    required this.onSignUp,
+    required this.onGoogle,
+    required this.onForgot,
+    required this.emailController,
+    required this.passwordController,
+    required this.isCompact,
+  });
+
+  final AuthMode mode;
+  final bool isLoading;
+  final bool showGoogle;
+  final _PasswordStrength strength;
+  final String? error;
+  final bool hasGoogleConfig;
+  final VoidCallback onCopyConfig;
+  final VoidCallback? onDocs;
+  final ValueChanged<AuthMode> onModeChange;
+  final VoidCallback onSignIn;
+  final VoidCallback onSignUp;
+  final VoidCallback onGoogle;
+  final VoidCallback onForgot;
+  final TextEditingController emailController;
+  final TextEditingController passwordController;
+  final bool isCompact;
+
+  @override
+  Widget build(BuildContext context) {
+    final isSignUp = mode == AuthMode.signUp;
+    final titleStyle = isCompact
+        ? Theme.of(context).textTheme.headlineSmall
+        : Theme.of(context).textTheme.headlineMedium;
+    final fieldTheme = Theme.of(context).inputDecorationTheme.copyWith(
+          isDense: isCompact,
+          contentPadding: isCompact
+              ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
+              : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        );
+    return Card(
+      child: Padding(
+        padding: EdgeInsets.all(isCompact ? 18 : 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              Strings.appTitle,
+              style: titleStyle?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              isSignUp ? Strings.signUp : Strings.signIn,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            SizedBox(height: isCompact ? 12 : 18),
+            SegmentedButton<AuthMode>(
+              segments: const [
+                ButtonSegment(
+                  value: AuthMode.signIn,
+                  label: Text(Strings.signIn),
+                ),
+                ButtonSegment(
+                  value: AuthMode.signUp,
+                  label: Text(Strings.signUp),
+                ),
+              ],
+              selected: {mode},
+              onSelectionChanged: (value) => onModeChange(value.first),
+            ),
+            SizedBox(height: isCompact ? 12 : 18),
+            Theme(
+              data: Theme.of(context).copyWith(
+                inputDecorationTheme: fieldTheme,
+              ),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration:
+                        const InputDecoration(labelText: Strings.emailLabel),
+                  ),
+                  SizedBox(height: isCompact ? 8 : 12),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: Strings.passwordLabel,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: isCompact ? 6 : 8),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              child: isSignUp
+                  ? Column(
+                      key: const ValueKey('signup-strength'),
+                      children: [
+                        Text(
+                          Strings.passwordRequirements,
+                          style: Theme.of(context).textTheme.bodySmall,
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: isCompact ? 6 : 8),
+                        LinearProgressIndicator(value: strength.progress),
+                        SizedBox(height: isCompact ? 4 : 6),
+                        Text(
+                          strength.label,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        SizedBox(height: isCompact ? 6 : 8),
+                        _PasswordChecklist(password: passwordController.text),
+                      ],
+                    )
+                  : const SizedBox.shrink(key: ValueKey('signin-spacer')),
+            ),
+            SizedBox(height: isCompact ? 10 : 12),
+            if (error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: AuthErrorMessage(error!),
+              ),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: isLoading ? null : (isSignUp ? onSignUp : onSignIn),
+                child: Text(isSignUp ? Strings.signUp : Strings.signIn),
+              ),
+            ),
+            SizedBox(height: isCompact ? 10 : 12),
+            if (!isSignUp)
+              TextButton(
+                onPressed: onForgot,
+                child: const Text(Strings.forgotPassword),
+              ),
+            if (showGoogle)
+              OutlinedButton.icon(
+                onPressed: isLoading ? null : onGoogle,
+                icon: const Icon(Icons.login),
+                label: const Text(Strings.continueWithGoogle),
+              ),
+            if (onDocs != null)
+              TextButton(
+                onPressed: onDocs,
+                child: const Text(Strings.openDocs),
+              ),
+            if (hasGoogleConfig)
+              TextButton(
+                onPressed: onCopyConfig,
+                child: const Text(Strings.copyGoogleConfig),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BrandPanel extends StatelessWidget {
+  const _BrandPanel({this.onDocs});
+
+  final VoidCallback? onDocs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              Strings.appTitle,
+              style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Une expérience fluide pour gérer vos comptes et documents.',
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+            const SizedBox(height: 20),
+            _FeatureRow(
+              title: 'Sécurité',
+              description: 'Authentification moderne avec Supabase.',
+            ),
+            _FeatureRow(
+              title: 'Productivité',
+              description: 'Accès rapide sur desktop et mobile.',
+            ),
+            _FeatureRow(
+              title: 'Confiance',
+              description: 'Flux email vérifié et récupération intégrée.',
+            ),
+            const Spacer(),
+            if (onDocs != null)
+              TextButton.icon(
+                onPressed: onDocs,
+                icon: const Icon(Icons.open_in_new),
+                label: const Text(Strings.openDocs),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FeatureRow extends StatelessWidget {
+  const _FeatureRow({required this.title, required this.description});
+
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.check_circle, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                Text(
+                  description,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GlowBlob extends StatelessWidget {
+  const _GlowBlob({required this.size, required this.color});
+
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(
+          colors: [color, color.withValues(alpha: 0.0)],
+        ),
       ),
     );
   }
