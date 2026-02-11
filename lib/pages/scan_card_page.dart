@@ -17,6 +17,7 @@ class ScanCardPage extends StatefulWidget {
 }
 
 enum CardType { cni, chifa, ccp }
+enum CniSide { recto, verso }
 
 class _ScanCardPageState extends State<ScanCardPage> {
   final _client = Supabase.instance.client;
@@ -24,9 +25,14 @@ class _ScanCardPageState extends State<ScanCardPage> {
   final _recognizer = TextRecognizer(script: TextRecognitionScript.latin);
 
   CardType _type = CardType.cni;
+  CniSide _cniSide = CniSide.recto;
   bool _loading = false;
   String? _imagePath;
   String _rawText = '';
+  String? _cniRectoPath;
+  String? _cniVersoPath;
+  String _cniRectoText = '';
+  String _cniVersoText = '';
   String? _error;
 
   final _cniNumero = TextEditingController();
@@ -34,6 +40,13 @@ class _ScanCardPageState extends State<ScanCardPage> {
   final _cniLieuDelivrance = TextEditingController();
   final _cniDateExpiration = TextEditingController();
   final _cniNomPrenom = TextEditingController();
+  final _cniNomAr = TextEditingController();
+  final _cniPrenomAr = TextEditingController();
+  final _cniDateNaissance = TextEditingController();
+  final _cniLieuNaissance = TextEditingController();
+  final _cniRh = TextEditingController();
+  final _cniNomVerso = TextEditingController();
+  final _cniPrenomVerso = TextEditingController();
   final _cniSexe = TextEditingController();
   final _cniDateLieuNaissance = TextEditingController();
   final _cniNin = TextEditingController();
@@ -56,6 +69,13 @@ class _ScanCardPageState extends State<ScanCardPage> {
     _cniLieuDelivrance.dispose();
     _cniDateExpiration.dispose();
     _cniNomPrenom.dispose();
+    _cniNomAr.dispose();
+    _cniPrenomAr.dispose();
+    _cniDateNaissance.dispose();
+    _cniLieuNaissance.dispose();
+    _cniRh.dispose();
+    _cniNomVerso.dispose();
+    _cniPrenomVerso.dispose();
     _cniSexe.dispose();
     _cniDateLieuNaissance.dispose();
     _cniNin.dispose();
@@ -84,17 +104,26 @@ class _ScanCardPageState extends State<ScanCardPage> {
         final result = await FilePicker.platform.pickFiles(
           type: FileType.image,
         );
-        if (result?.files.single.path != null) {
-          file = XFile(result!.files.single.path!);
+        final pickedPath = result?.files.single.path;
+        if (pickedPath != null) {
+          file = XFile(pickedPath);
         }
       }
-      if (file == null) {
+      final picked = file;
+      if (picked == null) {
         return;
       }
       setState(() {
-        _imagePath = file!.path;
+        _imagePath = picked.path;
+        if (_type == CardType.cni) {
+          if (_cniSide == CniSide.recto) {
+            _cniRectoPath = picked.path;
+          } else {
+            _cniVersoPath = picked.path;
+          }
+        }
       });
-      await _runOcr(file.path);
+      await _runOcr(picked.path);
     } catch (e) {
       setState(() => _error = 'Erreur scan: $e');
     }
@@ -107,7 +136,14 @@ class _ScanCardPageState extends State<ScanCardPage> {
       final result = await _recognizer.processImage(inputImage);
       final text = result.text;
       setState(() => _rawText = text);
-      _applyHeuristics(text);
+      if (_type == CardType.cni) {
+        if (_cniSide == CniSide.recto) {
+          _cniRectoText = text;
+        } else {
+          _cniVersoText = text;
+        }
+      }
+      _applyHeuristics(result);
     } catch (e) {
       setState(() => _error = 'OCR impossible: $e');
     } finally {
@@ -117,12 +153,9 @@ class _ScanCardPageState extends State<ScanCardPage> {
     }
   }
 
-  void _applyHeuristics(String text) {
-    final lines = text
-        .split('\n')
-        .map((line) => line.trim())
-        .where((line) => line.isNotEmpty)
-        .toList();
+  void _applyHeuristics(RecognizedText recognized) {
+    final text = recognized.text;
+    final lines = _extractOrderedLines(recognized);
     String findAfterLabel(List<String> labels) {
       for (final line in lines) {
         for (final label in labels) {
@@ -138,32 +171,61 @@ class _ScanCardPageState extends State<ScanCardPage> {
     }
 
     if (_type == CardType.cni) {
-      final dateMatch = _findFirstDate(text);
-      _cniNomPrenom.text =
-          _cniNomPrenom.text.isNotEmpty ? _cniNomPrenom.text : findAfterLabel(
-        ['nom', 'prenom', 'nom et prenom'],
-      );
-      _cniSexe.text =
-          _cniSexe.text.isNotEmpty ? _cniSexe.text : findAfterLabel(['sexe']);
-      _cniDateLieuNaissance.text = _cniDateLieuNaissance.text.isNotEmpty
-          ? _cniDateLieuNaissance.text
-          : findAfterLabel(['naissance', 'date et lieu']);
-      _cniDateDelivrance.text = _cniDateDelivrance.text.isNotEmpty
-          ? _cniDateDelivrance.text
-          : (findAfterLabel(['delivrance', 'delivrance']).isNotEmpty
-              ? findAfterLabel(['delivrance', 'delivrance'])
-              : dateMatch);
-      _cniLieuDelivrance.text = _cniLieuDelivrance.text.isNotEmpty
-          ? _cniLieuDelivrance.text
-          : findAfterLabel(['lieu de delivrance', 'delivrance']);
-      _cniDateExpiration.text = _cniDateExpiration.text.isNotEmpty
-          ? _cniDateExpiration.text
-          : (findAfterLabel(['expiration']).isNotEmpty
-              ? findAfterLabel(['expiration'])
-              : dateMatch);
-      final ninMatch = RegExp(r'\b\d{18}\b').firstMatch(text);
-      if (ninMatch != null && _cniNin.text.isEmpty) {
-        _cniNin.text = ninMatch.group(0) ?? '';
+      if (_cniSide == CniSide.recto) {
+        final ordered = lines.where((line) => line.isNotEmpty).toList();
+        final dateMatches = _findAllDates(text);
+        if (ordered.isNotEmpty && _cniNumero.text.isEmpty) {
+          _cniNumero.text = ordered[0];
+        }
+        if (ordered.length > 1 && _cniLieuDelivrance.text.isEmpty) {
+          _cniLieuDelivrance.text = ordered[1];
+        }
+        if (ordered.length > 2 && _cniDateDelivrance.text.isEmpty) {
+          _cniDateDelivrance.text = _extractFirstDate(ordered[2]) ??
+              (dateMatches.isNotEmpty ? dateMatches.first : '');
+        }
+        if (ordered.length > 3 && _cniDateExpiration.text.isEmpty) {
+          _cniDateExpiration.text = _extractFirstDate(ordered[3]) ??
+              (dateMatches.length > 1 ? dateMatches[1] : '');
+        }
+        final ninMatch = RegExp(r'\b\d{18}\b').firstMatch(text);
+        if (ninMatch != null && _cniNin.text.isEmpty) {
+          _cniNin.text = ninMatch.group(0) ?? '';
+        }
+        if (ordered.length > 5 && _cniNomAr.text.isEmpty) {
+          _cniNomAr.text = ordered[5];
+        }
+        if (ordered.length > 6 && _cniPrenomAr.text.isEmpty) {
+          _cniPrenomAr.text = ordered[6];
+        }
+        if (ordered.length > 7 && _cniDateNaissance.text.isEmpty) {
+          _cniDateNaissance.text = _extractFirstDate(ordered[7]) ??
+              (dateMatches.length > 2 ? dateMatches[2] : '');
+        }
+        if (ordered.length > 8 && _cniSexe.text.isEmpty) {
+          _cniSexe.text = ordered[8];
+        }
+        if (ordered.length > 9 && _cniRh.text.isEmpty) {
+          _cniRh.text = ordered[9];
+        }
+        if (ordered.length > 10 && _cniLieuNaissance.text.isEmpty) {
+          _cniLieuNaissance.text = ordered[10];
+        }
+        _cniNomPrenom.text =
+            _cniNomPrenom.text.isNotEmpty ? _cniNomPrenom.text : findAfterLabel(
+          ['nom', 'prenom', 'nom et prenom'],
+        );
+        _cniDateLieuNaissance.text = _cniDateLieuNaissance.text.isNotEmpty
+            ? _cniDateLieuNaissance.text
+            : findAfterLabel(['naissance', 'date et lieu']);
+      } else {
+        final candidates = lines.where((line) => line.isNotEmpty).toList();
+        if (candidates.isNotEmpty && _cniNomVerso.text.isEmpty) {
+          _cniNomVerso.text = candidates[0];
+        }
+        if (candidates.length > 1 && _cniPrenomVerso.text.isEmpty) {
+          _cniPrenomVerso.text = candidates[1];
+        }
       }
     } else if (_type == CardType.chifa) {
       final dateMatch = _findFirstDate(text);
@@ -185,7 +247,6 @@ class _ScanCardPageState extends State<ScanCardPage> {
           ? _chifaNumeroSerie.text
           : findAfterLabel(['serie', 'num', 'numero']);
     } else {
-      final dateMatch = _findFirstDate(text);
       _ccpNomPrenom.text = _ccpNomPrenom.text.isNotEmpty
           ? _ccpNomPrenom.text
           : findAfterLabel(['nom', 'prenom', 'titulaire']);
@@ -203,13 +264,36 @@ class _ScanCardPageState extends State<ScanCardPage> {
           _ccpCompte.text = altMatch.group(0) ?? '';
         }
       }
-      if (_ccpCle.text.isEmpty && dateMatch.isNotEmpty) {
-        // no-op
-      }
     }
     setState(() {});
   }
 
+  List<String> _extractOrderedLines(RecognizedText recognized) {
+    final lines = <TextLine>[];
+    for (final block in recognized.blocks) {
+      lines.addAll(block.lines);
+    }
+    lines.sort((a, b) {
+      final ay = a.boundingBox.top;
+      final by = b.boundingBox.top;
+      if (ay == by) {
+        return a.boundingBox.left.compareTo(b.boundingBox.left);
+      }
+      return ay.compareTo(by);
+    });
+    return lines.map((line) => line.text.trim()).where((t) => t.isNotEmpty).toList();
+  }
+
+  List<String> _findAllDates(String text) {
+    final matches = RegExp(r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b')
+        .allMatches(text);
+    return matches.map((m) => m.group(0) ?? '').where((v) => v.isNotEmpty).toList();
+  }
+
+  String? _extractFirstDate(String text) {
+    final match = RegExp(r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b').firstMatch(text);
+    return match?.group(0);
+  }
   String _findFirstDate(String text) {
     final normalized = _normalizeText(text);
     final match = RegExp(r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b')
@@ -434,7 +518,10 @@ class _ScanCardPageState extends State<ScanCardPage> {
           minWidth: 1600,
           minHeight: 1600,
         );
-        final bytes = await ((compressed ?? File(path)) as File).readAsBytes();
+        final fallbackPath = path;
+        final compressedPath = compressed?.path;
+        final bytes =
+            await File(compressedPath ?? fallbackPath).readAsBytes();
         await _client.storage.from('cartes').uploadBinary(
               storagePath,
               bytes,
@@ -454,9 +541,20 @@ class _ScanCardPageState extends State<ScanCardPage> {
         'cni_lieu_delivrance': _cniLieuDelivrance.text.trim(),
         'cni_date_expiration': _parseDate(_cniDateExpiration.text),
         'cni_nom_prenom': _cniNomPrenom.text.trim(),
+        'cni_nom_ar': _cniNomAr.text.trim(),
+        'cni_prenom_ar': _cniPrenomAr.text.trim(),
+        'cni_nom_verso': _cniNomVerso.text.trim(),
+        'cni_prenom_verso': _cniPrenomVerso.text.trim(),
         'cni_sexe': _cniSexe.text.trim(),
         'cni_date_lieu_naissance': _cniDateLieuNaissance.text.trim(),
+        'cni_date_naissance': _parseDate(_cniDateNaissance.text),
+        'cni_lieu_naissance': _cniLieuNaissance.text.trim(),
+        'cni_rh': _cniRh.text.trim(),
         'cni_nin': _cniNin.text.trim(),
+        'cni_recto_text': _cniRectoText,
+        'cni_verso_text': _cniVersoText,
+        'cni_recto_image_path': _cniRectoPath,
+        'cni_verso_image_path': _cniVersoPath,
         'chifa_immatriculation': _chifaImmatriculation.text.trim(),
         'chifa_nom_prenom': _chifaNomPrenom.text.trim(),
         'chifa_date_naissance': _parseDate(_chifaDateNaissance.text),
@@ -508,6 +606,19 @@ class _ScanCardPageState extends State<ScanCardPage> {
                     setState(() => _type = value.first);
                   },
                 ),
+                if (_type == CardType.cni) ...[
+                  const SizedBox(height: 12),
+                  SegmentedButton<CniSide>(
+                    segments: const [
+                      ButtonSegment(value: CniSide.recto, label: Text('Recto')),
+                      ButtonSegment(value: CniSide.verso, label: Text('Verso')),
+                    ],
+                    selected: {_cniSide},
+                    onSelectionChanged: (value) {
+                      setState(() => _cniSide = value.first);
+                    },
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Wrap(
                   spacing: 12,
@@ -520,9 +631,7 @@ class _ScanCardPageState extends State<ScanCardPage> {
                     ),
                     if (_imagePath != null)
                       Text(
-                        isCompact
-                            ? 'Fichier selectionne'
-                            : _imagePath!,
+                        isCompact ? 'Fichier selectionne' : _imagePath ?? '',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                   ],
@@ -588,9 +697,16 @@ class _ScanCardPageState extends State<ScanCardPage> {
         _field('Date de delivrance', _cniDateDelivrance),
         _field('Lieu de delivrance', _cniLieuDelivrance),
         _field('Date d\'expiration', _cniDateExpiration),
-        _field('Nom et prenoms', _cniNomPrenom),
+        _field('Nom et prenoms (latin)', _cniNomPrenom),
+        _field('Nom (arabe)', _cniNomAr),
+        _field('Prenom (arabe)', _cniPrenomAr),
+        _field('Nom (verso)', _cniNomVerso),
+        _field('Prenom (verso)', _cniPrenomVerso),
         _field('Sexe', _cniSexe),
-        _field('Date et lieu de naissance', _cniDateLieuNaissance),
+        _field('Date de naissance', _cniDateNaissance),
+        _field('Lieu de naissance', _cniLieuNaissance),
+        _field('Date et lieu de naissance (brut)', _cniDateLieuNaissance),
+        _field('RH', _cniRh),
         _field('NIN', _cniNin),
       ],
     );
