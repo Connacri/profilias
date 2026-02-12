@@ -7,8 +7,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_tesseract_ocr/flutter_tesseract_ocr.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:image/image.dart' as img;
 
+import 'cni_camera_page.dart';
 class ScanCardPage extends StatefulWidget {
   const ScanCardPage({super.key});
 
@@ -97,7 +101,22 @@ class _ScanCardPageState extends State<ScanCardPage> {
     });
     try {
       XFile? file;
-      if (defaultTargetPlatform == TargetPlatform.android ||
+      if (_type == CardType.cni &&
+          (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS)) {
+        final resultPath = await Navigator.of(context).push<String>(
+          MaterialPageRoute(
+            builder: (_) => CniCameraPage(
+              side: _cniSide == CniSide.recto
+                  ? CniCaptureSide.recto
+                  : CniCaptureSide.verso,
+            ),
+          ),
+        );
+        if (resultPath != null) {
+          file = XFile(resultPath);
+        }
+      } else if (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS) {
         file = await _imagePicker.pickImage(source: ImageSource.camera);
       } else {
@@ -129,21 +148,49 @@ class _ScanCardPageState extends State<ScanCardPage> {
     }
   }
 
+  Future<void> _loadAssetAndRun(String assetPath) async {
+    setState(() {
+      _error = null;
+      _rawText = '';
+    });
+    try {
+      final bytes = await rootBundle.load(assetPath);
+      final tempDir = await getTemporaryDirectory();
+      final fileName =
+          'asset_${DateTime.now().millisecondsSinceEpoch}_${assetPath.split('/').last}';
+      final file = File('${tempDir.path}/$fileName');
+      await file.writeAsBytes(bytes.buffer.asUint8List());
+      setState(() {
+        _imagePath = file.path;
+        if (_type == CardType.cni) {
+          if (_cniSide == CniSide.recto) {
+            _cniRectoPath = file.path;
+          } else {
+            _cniVersoPath = file.path;
+          }
+        }
+      });
+      await _runOcr(file.path);
+    } catch (e) {
+      setState(() => _error = 'Test OCR impossible: $e');
+    }
+  }
+
   Future<void> _runOcr(String path) async {
     setState(() => _loading = true);
     try {
-      final inputImage = InputImage.fromFilePath(path);
-      final result = await _recognizer.processImage(inputImage);
-      final text = result.text;
-      setState(() => _rawText = text);
-      if (_type == CardType.cni) {
-        if (_cniSide == CniSide.recto) {
-          _cniRectoText = text;
+      if (_type == CardType.cni && _cniSide == CniSide.recto) {
+        final tesseractText = await _runTesseract(path);
+        if (tesseractText.trim().isNotEmpty) {
+          setState(() => _rawText = tesseractText);
+          _cniRectoText = tesseractText;
+          _applyHeuristicsText(tesseractText, _splitLines(tesseractText));
         } else {
-          _cniVersoText = text;
+          await _runMlKit(path);
         }
+      } else {
+        await _runMlKit(path);
       }
-      _applyHeuristics(result);
     } catch (e) {
       setState(() => _error = 'OCR impossible: $e');
     } finally {
@@ -153,9 +200,89 @@ class _ScanCardPageState extends State<ScanCardPage> {
     }
   }
 
-  void _applyHeuristics(RecognizedText recognized) {
-    final text = recognized.text;
-    final lines = _extractOrderedLines(recognized);
+  Future<void> _runMlKit(String path) async {
+    final inputImage = InputImage.fromFilePath(path);
+    final result = await _recognizer.processImage(inputImage);
+    final text = result.text;
+    setState(() => _rawText = text);
+    if (_type == CardType.cni) {
+      if (_cniSide == CniSide.recto) {
+        _cniRectoText = text;
+      } else {
+        _cniVersoText = text;
+      }
+    }
+    _applyHeuristicsText(text, _extractOrderedLines(result));
+  }
+
+  Future<String> _runTesseract(String path) async {
+    if (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.macOS) {
+      return '';
+    }
+    final processedPath = await _preprocessForOcr(path);
+    return FlutterTesseractOcr.extractText(
+      processedPath ?? path,
+      language: 'ara+fra',
+      args: {'preserve_interword_spaces': '1'},
+    );
+  }
+
+  void _rerunOcr() {
+    final path = _imagePath;
+    if (path == null || path.isEmpty) return;
+    _runOcr(path);
+  }
+
+  List<String> _splitLines(String text) {
+    return text
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+  }
+
+  Future<String?> _preprocessForOcr(String path) async {
+    try {
+      final bytes = await File(path).readAsBytes();
+      final image = img.decodeImage(bytes);
+      if (image == null) return null;
+      final grayscale = img.grayscale(image);
+      final contrasted = img.adjustColor(
+        grayscale,
+        contrast: 1.2,
+        gamma: 0.9,
+      );
+      final thresholded = _thresholdImage(contrasted, 150);
+      final tempDir = await getTemporaryDirectory();
+      final outPath =
+          '${tempDir.path}/ocr_${DateTime.now().millisecondsSinceEpoch}.png';
+      final outFile = File(outPath);
+      await outFile.writeAsBytes(img.encodePng(thresholded));
+      return outPath;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  img.Image _thresholdImage(img.Image src, int threshold) {
+    final out = img.Image.from(src);
+    for (var y = 0; y < out.height; y++) {
+      for (var x = 0; x < out.width; x++) {
+        final pixel = out.getPixel(x, y);
+        final r = pixel.r.toInt();
+        final g = pixel.g.toInt();
+        final b = pixel.b.toInt();
+        final lum = (0.299 * r + 0.587 * g + 0.114 * b).round();
+        final v = lum >= threshold ? 255 : 0;
+        out.setPixelRgba(x, y, v, v, v, 255);
+      }
+    }
+    return out;
+  }
+
+  void _applyHeuristicsText(String text, List<String> lines) {
     String findAfterLabel(List<String> labels) {
       for (final line in lines) {
         for (final label in labels) {
@@ -169,62 +296,157 @@ class _ScanCardPageState extends State<ScanCardPage> {
       }
       return '';
     }
+    String findAfterArabicLabel(String label) {
+      for (final line in lines) {
+        if (line.contains(label)) {
+          final index = lines.indexOf(line);
+          if (index + 1 < lines.length) {
+            return lines[index + 1];
+          }
+        }
+      }
+      return '';
+    }
+    String findSameLineValue(String label) {
+      for (final line in lines) {
+        if (line.toLowerCase().contains(label.toLowerCase())) {
+          return line;
+        }
+      }
+      return '';
+    }
 
     if (_type == CardType.cni) {
       if (_cniSide == CniSide.recto) {
-        final ordered = lines.where((line) => line.isNotEmpty).toList();
         final dateMatches = _findAllDates(text);
-        if (ordered.isNotEmpty && _cniNumero.text.isEmpty) {
-          _cniNumero.text = ordered[0];
+        final cniNumberMatch = RegExp(r'\b\d{8,12}\b').firstMatch(text);
+        if (cniNumberMatch != null && _cniNumero.text.isEmpty) {
+          _cniNumero.text = cniNumberMatch.group(0) ?? '';
         }
-        if (ordered.length > 1 && _cniLieuDelivrance.text.isEmpty) {
-          _cniLieuDelivrance.text = ordered[1];
+        final issueLine = findSameLineValue('تاريخ الإصدار');
+        if (_cniDateDelivrance.text.isEmpty) {
+          _cniDateDelivrance.text = _formatDateString(
+                _extractFirstDate(issueLine) ??
+                    (dateMatches.isNotEmpty ? dateMatches.first : ''),
+              ) ??
+              _cleanValue(issueLine);
         }
-        if (ordered.length > 2 && _cniDateDelivrance.text.isEmpty) {
-          _cniDateDelivrance.text = _extractFirstDate(ordered[2]) ??
-              (dateMatches.isNotEmpty ? dateMatches.first : '');
+        final expiryLine = findSameLineValue('تاريخ الانتهاء');
+        if (_cniDateExpiration.text.isEmpty) {
+          _cniDateExpiration.text = _formatDateString(
+                _extractFirstDate(expiryLine) ??
+                    (dateMatches.length > 1 ? dateMatches[1] : ''),
+              ) ??
+              _cleanValue(expiryLine);
         }
-        if (ordered.length > 3 && _cniDateExpiration.text.isEmpty) {
-          _cniDateExpiration.text = _extractFirstDate(ordered[3]) ??
-              (dateMatches.length > 1 ? dateMatches[1] : '');
+        final issuePlaceLine = findSameLineValue('سلطة الإصدار');
+        if (_cniLieuDelivrance.text.isEmpty) {
+          _cniLieuDelivrance.text = _cleanValue(issuePlaceLine, keepCase: true);
         }
         final ninMatch = RegExp(r'\b\d{18}\b').firstMatch(text);
         if (ninMatch != null && _cniNin.text.isEmpty) {
           _cniNin.text = ninMatch.group(0) ?? '';
         }
-        if (ordered.length > 5 && _cniNomAr.text.isEmpty) {
-          _cniNomAr.text = ordered[5];
+        if (_cniNomAr.text.isEmpty) {
+          final nomAr = findSameLineValue('اللقب');
+          _cniNomAr.text = _stripArabicLabel(nomAr, 'اللقب');
         }
-        if (ordered.length > 6 && _cniPrenomAr.text.isEmpty) {
-          _cniPrenomAr.text = ordered[6];
+        if (_cniPrenomAr.text.isEmpty) {
+          final prenomAr = findSameLineValue('الاسم');
+          _cniPrenomAr.text = _stripArabicLabel(prenomAr, 'الاسم');
         }
-        if (ordered.length > 7 && _cniDateNaissance.text.isEmpty) {
-          _cniDateNaissance.text = _extractFirstDate(ordered[7]) ??
-              (dateMatches.length > 2 ? dateMatches[2] : '');
+        if (_cniDateNaissance.text.isEmpty) {
+          final dobLine = findSameLineValue('تاريخ الميلاد');
+          _cniDateNaissance.text = _formatDateString(
+                _extractFirstDate(dobLine) ??
+                    (dateMatches.length > 2 ? dateMatches[2] : ''),
+              ) ??
+              _cleanValue(dobLine);
         }
-        if (ordered.length > 8 && _cniSexe.text.isEmpty) {
-          _cniSexe.text = ordered[8];
+        if (_cniLieuNaissance.text.isEmpty) {
+          final pobLine = findSameLineValue('مكان الميلاد');
+          _cniLieuNaissance.text = _cleanValue(pobLine, keepCase: true);
         }
-        if (ordered.length > 9 && _cniRh.text.isEmpty) {
-          _cniRh.text = ordered[9];
+        if (_cniSexe.text.isEmpty) {
+          final sexLine = findSameLineValue('الجنس');
+          _cniSexe.text = _cleanValue(sexLine);
         }
-        if (ordered.length > 10 && _cniLieuNaissance.text.isEmpty) {
-          _cniLieuNaissance.text = ordered[10];
+        if (_cniRh.text.isEmpty) {
+          final rhLine = findSameLineValue('Rh');
+          _cniRh.text = _cleanValue(rhLine, keepCase: true);
         }
-        _cniNomPrenom.text =
-            _cniNomPrenom.text.isNotEmpty ? _cniNomPrenom.text : findAfterLabel(
-          ['nom', 'prenom', 'nom et prenom'],
-        );
-        _cniDateLieuNaissance.text = _cniDateLieuNaissance.text.isNotEmpty
-            ? _cniDateLieuNaissance.text
-            : findAfterLabel(['naissance', 'date et lieu']);
+        if (_cniDateLieuNaissance.text.isEmpty) {
+          _cniDateLieuNaissance.text = findAfterArabicLabel('تاريخ الميلاد');
+        }
       } else {
-        final candidates = lines.where((line) => line.isNotEmpty).toList();
-        if (candidates.isNotEmpty && _cniNomVerso.text.isEmpty) {
-          _cniNomVerso.text = candidates[0];
-        }
-        if (candidates.length > 1 && _cniPrenomVerso.text.isEmpty) {
-          _cniPrenomVerso.text = candidates[1];
+        final mrzLines =
+            lines.where((l) => l.startsWith('ID') || l.contains('<<<')).toList();
+        if (mrzLines.length >= 3) {
+          final line1 = mrzLines[0];
+          final line2 = mrzLines[1];
+          final line3 = mrzLines[2];
+          final mrzNumber = RegExp(r'ID[A-Z]{3}(\d{8,12})')
+              .firstMatch(line1)
+              ?.group(1);
+          if (mrzNumber != null && _cniNumero.text.isEmpty) {
+            _cniNumero.text = mrzNumber;
+          }
+          final dobMatch = RegExp(r'\d{6}').firstMatch(line2)?.group(0);
+          if (dobMatch != null && _cniDateNaissance.text.isEmpty) {
+            _cniDateNaissance.text = _formatDateString(
+                  _mrzDateToString(dobMatch),
+                ) ??
+                _mrzDateToString(dobMatch);
+          }
+          final expMatch = RegExp(r'\d{6}[A-Z]\d{6}')
+              .firstMatch(line2)
+              ?.group(0);
+          if (expMatch != null && _cniDateExpiration.text.isEmpty) {
+            final exp = expMatch.substring(7, 13);
+            _cniDateExpiration.text = _formatDateString(
+                  _mrzDateToString(exp),
+                ) ??
+                _mrzDateToString(exp);
+          }
+          final names = line3.split('<<');
+          if (names.isNotEmpty && _cniNomVerso.text.isEmpty) {
+            _cniNomVerso.text = _formatLatinNameUpper(names.first);
+          }
+          if (names.length > 1 && _cniPrenomVerso.text.isEmpty) {
+            final prenoms = names.sublist(1).join(' ');
+            _cniPrenomVerso.text = _formatLatinNameCapitalized(prenoms);
+          }
+        } else {
+          final nomLine = lines.firstWhere(
+            (l) => l.toLowerCase().contains('nom'),
+            orElse: () => '',
+          );
+          final prenomLine = lines.firstWhere(
+            (l) =>
+                l.toLowerCase().contains('prénom') ||
+                l.toLowerCase().contains('prenom'),
+            orElse: () => '',
+          );
+          if (nomLine.isNotEmpty && _cniNomVerso.text.isEmpty) {
+            _cniNomVerso.text = _formatLatinNameUpper(nomLine);
+          } else {
+            final candidates = lines.where((line) => line.isNotEmpty).toList();
+            if (candidates.isNotEmpty && _cniNomVerso.text.isEmpty) {
+              _cniNomVerso.text = _formatLatinNameUpper(
+                _cleanValue(candidates[0]),
+              );
+            }
+          }
+          if (prenomLine.isNotEmpty && _cniPrenomVerso.text.isEmpty) {
+            _cniPrenomVerso.text = _formatLatinNameCapitalized(prenomLine);
+          } else {
+            final candidates = lines.where((line) => line.isNotEmpty).toList();
+            if (candidates.length > 1 && _cniPrenomVerso.text.isEmpty) {
+              _cniPrenomVerso.text = _formatLatinNameCapitalized(
+                _cleanValue(candidates[1]),
+              );
+            }
+          }
         }
       }
     } else if (_type == CardType.chifa) {
@@ -310,21 +532,107 @@ class _ScanCardPageState extends State<ScanCardPage> {
     if (trimmed.isEmpty) {
       return null;
     }
-    if (!RegExp(r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$').hasMatch(trimmed)) {
-      return null;
-    }
     final parts = trimmed.split(RegExp(r'[-/.]'));
     if (parts.length != 3) {
       return null;
     }
-    final day = int.tryParse(parts[0]);
-    final month = int.tryParse(parts[1]);
-    final year = int.tryParse(parts[2]);
+    int? year;
+    int? month;
+    int? day;
+    if (parts[0].length == 4) {
+      year = int.tryParse(parts[0]);
+      month = int.tryParse(parts[1]);
+      day = int.tryParse(parts[2]);
+    } else {
+      day = int.tryParse(parts[0]);
+      month = int.tryParse(parts[1]);
+      year = int.tryParse(parts[2]);
+    }
     if (day == null || month == null || year == null) {
       return null;
     }
     return DateTime(year, month, day);
   }
+
+  String? _formatDateString(String value) {
+    final parsed = _parseDate(value);
+    if (parsed == null) return null;
+    final day = parsed.day.toString().padLeft(2, '0');
+    final month = parsed.month.toString().padLeft(2, '0');
+    final year = parsed.year.toString().padLeft(4, '0');
+    return '$day/$month/$year';
+  }
+
+  String _cleanValue(String value, {bool keepCase = false}) {
+    var cleaned = value.replaceAll(
+      RegExp(r'\bnom\b\s*:?', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r'\bprenom\b\s*:?', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r'\bnom et prenom\b\s*:?', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r'\bsexe\b\s*:?', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r'\bgenre\b\s*:?', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r'\brh\b\s*:?', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll('تاريخ الميلاد:', '');
+    cleaned = cleaned.replaceAll('مكان الميلاد:', '');
+    cleaned = cleaned.replaceAll('الجنس:', '');
+    cleaned = cleaned.replaceAll('اللقب:', '');
+    cleaned = cleaned.replaceAll('الاسم:', '');
+    cleaned = cleaned.replaceAll('رقم التعريف الوطني:', '');
+    cleaned = cleaned.replaceAll('سلطة الإصدار:', '');
+    cleaned = cleaned.replaceAll('تاريخ الإصدار:', '');
+    cleaned = cleaned.replaceAll('تاريخ الانتهاء:', '');
+    cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return keepCase ? cleaned : cleaned.toLowerCase();
+  }
+
+  String _stripArabicLabel(String line, String label) {
+    if (line.contains(label)) {
+      return line.replaceAll(label, '').replaceAll(':', '').trim();
+    }
+    return line.trim();
+  }
+
+  String _mrzDateToString(String yymmdd) {
+    if (yymmdd.length != 6) return yymmdd;
+    final year = int.tryParse(yymmdd.substring(0, 2));
+    final month = yymmdd.substring(2, 4);
+    final day = yymmdd.substring(4, 6);
+    if (year == null) return yymmdd;
+    final fullYear = year >= 50 ? 1900 + year : 2000 + year;
+    return '$day/$month/$fullYear';
+  }
+
+  String _formatLatinNameUpper(String value) {
+    final cleaned = _cleanValue(value);
+    return cleaned.toUpperCase();
+  }
+
+  String _formatLatinNameCapitalized(String value) {
+    final cleaned = _cleanValue(value);
+    return cleaned
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .map((part) =>
+            part[0].toUpperCase() + part.substring(1).toLowerCase())
+        .join(' ');
+  }
+
 
   String _extractPlace(String text) {
     final normalized = _normalizeText(text);
@@ -522,12 +830,16 @@ class _ScanCardPageState extends State<ScanCardPage> {
         final compressedPath = compressed?.path;
         final bytes =
             await File(compressedPath ?? fallbackPath).readAsBytes();
-        await _client.storage.from('cartes').uploadBinary(
-              storagePath,
-              bytes,
-              fileOptions: const FileOptions(contentType: 'image/jpeg'),
-            );
-        publicUrl = _client.storage.from('cartes').getPublicUrl(storagePath);
+        try {
+          await _client.storage.from('cartes').uploadBinary(
+                storagePath,
+                bytes,
+                fileOptions: const FileOptions(contentType: 'image/jpeg'),
+              );
+          publicUrl = _client.storage.from('cartes').getPublicUrl(storagePath);
+        } catch (e) {
+          _error = 'Upload storage impossible: $e';
+        }
       }
       final payload = <String, dynamic>{
         'user_id': user.id,
@@ -629,6 +941,31 @@ class _ScanCardPageState extends State<ScanCardPage> {
                       icon: const Icon(Icons.document_scanner),
                       label: const Text('Scanner'),
                     ),
+                    OutlinedButton.icon(
+                      onPressed: _loading ? null : _rerunOcr,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Relancer OCR'),
+                    ),
+                    if (_type == CardType.cni)
+                      OutlinedButton.icon(
+                        onPressed: _loading
+                            ? null
+                            : () => _loadAssetAndRun(
+                                  'assets/image-1770802397842.jpg',
+                                ),
+                        icon: const Icon(Icons.image),
+                        label: const Text('Test CNI 1'),
+                      ),
+                    if (_type == CardType.cni)
+                      OutlinedButton.icon(
+                        onPressed: _loading
+                            ? null
+                            : () => _loadAssetAndRun(
+                                  'assets/image-1770802406616.jpg',
+                                ),
+                        icon: const Icon(Icons.image_outlined),
+                        label: const Text('Test CNI 2'),
+                      ),
                     if (_imagePath != null)
                       Text(
                         isCompact ? 'Fichier selectionne' : _imagePath ?? '',
@@ -636,6 +973,18 @@ class _ScanCardPageState extends State<ScanCardPage> {
                       ),
                   ],
                 ),
+                if (_imagePath != null) ...[
+                  const SizedBox(height: 12),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(
+                      File(_imagePath!),
+                      height: 220,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ],
                 if (_rawText.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   Text('Texte detecte',
