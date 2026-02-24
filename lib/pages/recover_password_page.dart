@@ -5,8 +5,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/auth_service.dart';
 import '../strings.dart';
+import '../widgets/app_buttons.dart';
 import '../widgets/auth_error_message.dart';
 import 'reset_password_page.dart';
+import '../widgets/responsive_layout.dart';
 
 class RecoverPasswordPage extends StatefulWidget {
   const RecoverPasswordPage({super.key});
@@ -44,11 +46,21 @@ class _RecoverPasswordPageState extends State<RecoverPasswordPage> {
     super.dispose();
   }
 
+  Future<void> _ensureMinDelay(Stopwatch stopwatch) async {
+    const minDelay = Duration(milliseconds: 400);
+    stopwatch.stop();
+    final remaining = minDelay - stopwatch.elapsed;
+    if (remaining > Duration.zero) {
+      await Future.delayed(remaining);
+    }
+  }
+
   Future<void> _recoverPassword() async {
     setState(() {
       _isLoading = true;
       _error = null;
     });
+    final stopwatch = Stopwatch()..start();
     try {
       await _authService.resetPasswordForEmail(
         _emailController.text.trim(),
@@ -64,6 +76,7 @@ class _RecoverPasswordPageState extends State<RecoverPasswordPage> {
     } catch (_) {
       setState(() => _error = Strings.connectionError);
     } finally {
+      await _ensureMinDelay(stopwatch);
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -74,33 +87,42 @@ class _RecoverPasswordPageState extends State<RecoverPasswordPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text(Strings.recoverPassword)),
-      body: Padding(
+      body: ResponsiveLayout(
+        maxWidth: 520,
         padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextField(
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(labelText: Strings.emailLabel),
-            ),
-            const SizedBox(height: 16),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: AuthErrorMessage(_error!),
+        builder: (context, info) {
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              TextField(
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: Strings.emailLabel),
               ),
-            ElevatedButton(
-              onPressed: _isLoading ? null : _recoverPassword,
-              child: const Text(Strings.recoverPassword),
-            ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text(Strings.backToSignIn),
-            ),
-          ],
-        ),
+              const SizedBox(height: 16),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: AuthErrorMessage(_error!),
+                ),
+              AppPrimaryButton(
+                onPressed: _isLoading ? null : _recoverPassword,
+                child: _isLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text(Strings.recoverPassword),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text(Strings.backToSignIn),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

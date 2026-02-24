@@ -4,6 +4,9 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../widgets/responsive_layout.dart';
+import '../widgets/app_buttons.dart';
+
 enum CniCaptureSide { recto, verso }
 
 class CniCameraPage extends StatefulWidget {
@@ -83,13 +86,21 @@ class _CniCameraPageState extends State<CniCameraPage> {
   Widget build(BuildContext context) {
     if (_initializing) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        body: ResponsiveLayout(
+          maxWidth: double.infinity,
+          alignment: Alignment.center,
+          builder: _LoadingView.build,
+        ),
       );
     }
     if (_error != null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Camera CNI')),
-        body: Center(child: Text(_error!)),
+        body: ResponsiveLayout(
+          maxWidth: double.infinity,
+          alignment: Alignment.center,
+          builder: (context, info) => Text(_error!),
+        ),
       );
     }
     final controller = _controller!;
@@ -101,44 +112,56 @@ class _CniCameraPageState extends State<CniCameraPage> {
               : 'Scanner CNI - Verso',
         ),
       ),
-      body: Stack(
-        children: [
-          Positioned.fill(child: CameraPreview(controller)),
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _CniOverlayPainter(side: widget.side),
-            ),
-          ),
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 24,
-            child: Column(
-              children: [
-                if (widget.side == CniCaptureSide.recto)
-                  const Text(
-                    'Aligne la carte dans le cadre. Assure une bonne lumiere.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white),
-                  )
-                else
-                  const Text(
-                    'Aligne le verso dans le cadre (MRZ en bas).',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white),
-                  ),
-                const SizedBox(height: 12),
-                ElevatedButton.icon(
-                  onPressed: _capturing ? null : _capture,
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text('Capturer'),
+      body: ResponsiveLayout(
+        maxWidth: double.infinity,
+        padding: EdgeInsets.zero,
+        builder: (context, info) {
+          return Stack(
+            children: [
+              Positioned.fill(child: CameraPreview(controller)),
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _CniOverlayPainter(side: widget.side),
                 ),
-              ],
-            ),
-          ),
-        ],
+              ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 24,
+                child: Column(
+                  children: [
+                    if (widget.side == CniCaptureSide.recto)
+                      const Text(
+                        'Aligne la carte dans le cadre. Assure une bonne lumiere.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white),
+                      )
+                    else
+                      const Text(
+                        'Aligne le verso dans le cadre (MRZ en bas).',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    const SizedBox(height: 12),
+                    AppPrimaryButton(
+                      onPressed: _capturing ? null : _capture,
+                      icon: const Icon(Icons.camera_alt),
+                      child: const Text('Capturer'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
+  }
+}
+
+class _LoadingView {
+  static Widget build(BuildContext context, ResponsiveInfo info) {
+    return const Center(child: CircularProgressIndicator());
   }
 }
 

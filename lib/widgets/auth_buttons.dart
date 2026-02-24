@@ -1,6 +1,7 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import '../strings.dart';
+import 'app_buttons.dart';
 
 class AuthButtons extends StatelessWidget {
   const AuthButtons({
@@ -25,7 +26,7 @@ class AuthButtons extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            ElevatedButton(
+            AppPrimaryButton(
               onPressed: isLoading ? null : onSignIn,
               child: const Text(Strings.signIn),
             ),

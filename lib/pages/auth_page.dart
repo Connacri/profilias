@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 import '../services/auth_service.dart';
 import '../strings.dart';
+import '../widgets/app_buttons.dart';
 import '../widgets/auth_error_message.dart';
 import 'email_verification_page.dart';
 import 'recover_password_page.dart';
@@ -26,12 +27,23 @@ class _AuthPageState extends State<AuthPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _isGoogleLoading = false;
   String? _error;
   String? _lastHelpUrl;
   AuthMode _mode = AuthMode.signIn;
 
   bool get _isWindowsDesktop =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  @override
+  void initState() {
+    super.initState();
+    _passwordController.addListener(() {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -128,13 +140,24 @@ class _AuthPageState extends State<AuthPage> {
         msg.contains('user already');
   }
 
+  Future<void> _ensureMinDelay(Stopwatch stopwatch) async {
+    const minDelay = Duration(milliseconds: 400);
+    stopwatch.stop();
+    final remaining = minDelay - stopwatch.elapsed;
+    if (remaining > Duration.zero) {
+      await Future.delayed(remaining);
+    }
+  }
+
   Future<void> _signInWithGoogle() async {
     setState(() {
+      _isGoogleLoading = true;
       _isLoading = true;
       _error = null;
       _lastHelpUrl = null;
     });
 
+    final stopwatch = Stopwatch()..start();
     try {
       await _authService.signInWithGoogle();
     } on AuthException catch (e) {
@@ -144,8 +167,12 @@ class _AuthPageState extends State<AuthPage> {
     } catch (_) {
       _showError(Strings.googleError, includeHelp: true);
     } finally {
+      await _ensureMinDelay(stopwatch);
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isGoogleLoading = false;
+          _isLoading = false;
+        });
       }
     }
   }
@@ -156,6 +183,7 @@ class _AuthPageState extends State<AuthPage> {
       _error = null;
       _lastHelpUrl = null;
     });
+    final stopwatch = Stopwatch()..start();
     try {
       final exists =
           await _authService.safeEmailExists(_emailController.text.trim());
@@ -181,6 +209,7 @@ class _AuthPageState extends State<AuthPage> {
     } catch (_) {
       _showError(Strings.connectionError);
     } finally {
+      await _ensureMinDelay(stopwatch);
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -199,6 +228,7 @@ class _AuthPageState extends State<AuthPage> {
       _error = null;
       _lastHelpUrl = null;
     });
+    final stopwatch = Stopwatch()..start();
     try {
       final exists =
           await _authService.safeEmailExists(_emailController.text.trim());
@@ -233,6 +263,7 @@ class _AuthPageState extends State<AuthPage> {
     } catch (_) {
       _showError(Strings.signUpError);
     } finally {
+      await _ensureMinDelay(stopwatch);
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -266,8 +297,8 @@ class _AuthPageState extends State<AuthPage> {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      Color(0xFFF7F5F2),
-                      Color(0xFFE9F1F0),
+                      Color(0xFFF9F5F0),
+                      Color(0xFFEAF3F1),
                     ],
                   ),
                 ),
@@ -277,7 +308,7 @@ class _AuthPageState extends State<AuthPage> {
                 top: -80,
                 child: _GlowBlob(
                   size: 280,
-                  color: const Color(0xFF00A6A6).withValues(alpha: 0.15),
+                  color: const Color(0xFF0F766E).withValues(alpha: 0.18),
                 ),
               ),
               Positioned(
@@ -285,7 +316,7 @@ class _AuthPageState extends State<AuthPage> {
                 bottom: -120,
                 child: _GlowBlob(
                   size: 320,
-                  color: const Color(0xFF1B3C59).withValues(alpha: 0.12),
+                  color: const Color(0xFF1F3A5F).withValues(alpha: 0.14),
                 ),
               ),
               Center(
@@ -308,6 +339,7 @@ class _AuthPageState extends State<AuthPage> {
                           child: _AuthCard(
                             mode: _mode,
                             isLoading: _isLoading,
+                            isGoogleLoading: _isGoogleLoading,
                             showGoogle: showGoogle,
                             strength: strength,
                             error: _error,
@@ -325,6 +357,7 @@ class _AuthPageState extends State<AuthPage> {
                             ),
                             emailController: _emailController,
                             passwordController: _passwordController,
+                            validatePassword: _validatePassword,
                             isCompact: !isWide,
                           ),
                         ),
@@ -360,11 +393,15 @@ class _PasswordChecklist extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
         _ChecklistRow(label: '8+ caractères', ok: _hasMinLength),
+        const SizedBox(width: 12),
         _ChecklistRow(label: '1 majuscule', ok: _hasUpper),
+        const SizedBox(width: 12),
         _ChecklistRow(label: '1 minuscule', ok: _hasLower),
+        const SizedBox(width: 12),
         _ChecklistRow(label: '1 chiffre', ok: _hasDigit),
       ],
     );
@@ -398,6 +435,7 @@ class _AuthCard extends StatelessWidget {
   const _AuthCard({
     required this.mode,
     required this.isLoading,
+    required this.isGoogleLoading,
     required this.showGoogle,
     required this.strength,
     required this.error,
@@ -411,11 +449,13 @@ class _AuthCard extends StatelessWidget {
     required this.onForgot,
     required this.emailController,
     required this.passwordController,
+    required this.validatePassword,
     required this.isCompact,
   });
 
   final AuthMode mode;
   final bool isLoading;
+  final bool isGoogleLoading;
   final bool showGoogle;
   final _PasswordStrength strength;
   final String? error;
@@ -429,6 +469,7 @@ class _AuthCard extends StatelessWidget {
   final VoidCallback onForgot;
   final TextEditingController emailController;
   final TextEditingController passwordController;
+  final String? Function(String value) validatePassword;
   final bool isCompact;
 
   @override
@@ -443,6 +484,18 @@ class _AuthCard extends StatelessWidget {
               ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
               : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         );
+    final segmentHeight = isCompact ? 70.0 : 82.0;
+    final segmentStyle = ButtonStyle(
+      minimumSize:
+          MaterialStatePropertyAll(Size(0, segmentHeight)),
+      padding: MaterialStatePropertyAll(
+        EdgeInsets.symmetric(
+          horizontal: isCompact ? 12 : 16,
+          vertical: isCompact ? 12 : 14,
+        ),
+      ),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
     return Card(
       child: Padding(
         padding: EdgeInsets.all(isCompact ? 18 : 24),
@@ -458,7 +511,12 @@ class _AuthCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               isSignUp ? Strings.signUp : Strings.signIn,
-              style: Theme.of(context).textTheme.titleMedium,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize:
+                        (Theme.of(context).textTheme.titleMedium?.fontSize ??
+                                16) *
+                            1.2,
+                  ),
             ),
             SizedBox(height: isCompact ? 12 : 18),
             SegmentedButton<AuthMode>(
@@ -474,6 +532,7 @@ class _AuthCard extends StatelessWidget {
               ],
               selected: {mode},
               onSelectionChanged: (value) => onModeChange(value.first),
+              style: segmentStyle,
             ),
             SizedBox(height: isCompact ? 12 : 18),
             Theme(
@@ -492,8 +551,12 @@ class _AuthCard extends StatelessWidget {
                   TextField(
                     controller: passwordController,
                     obscureText: true,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: Strings.passwordLabel,
+                      errorText: isSignUp &&
+                              passwordController.text.isNotEmpty
+                          ? validatePassword(passwordController.text)
+                          : null,
                     ),
                   ),
                 ],
@@ -532,9 +595,19 @@ class _AuthCard extends StatelessWidget {
               ),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
+              child: AppPrimaryButton(
                 onPressed: isLoading ? null : (isSignUp ? onSignUp : onSignIn),
-                child: Text(isSignUp ? Strings.signUp : Strings.signIn),
+                isFullWidth: true,
+                child: isLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : Text(isSignUp ? Strings.signUp : Strings.signIn),
               ),
             ),
             SizedBox(height: isCompact ? 10 : 12),
@@ -547,7 +620,13 @@ class _AuthCard extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: isLoading ? null : onGoogle,
                 icon: const Icon(Icons.login),
-                label: const Text(Strings.continueWithGoogle),
+                label: isGoogleLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text(Strings.continueWithGoogle),
               ),
             if (onDocs != null)
               TextButton(

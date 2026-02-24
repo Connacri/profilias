@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/auth_service.dart';
 import '../strings.dart';
+import '../widgets/app_buttons.dart';
 import '../widgets/auth_error_message.dart';
 
 class EmailVerificationPage extends StatefulWidget {
@@ -27,6 +28,8 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
 
   final _authService = AuthService();
   bool _isLoading = false;
+  bool _isReturning = false;
+  bool _isOpeningMailbox = false;
   String? _error;
   Timer? _cooldownTimer;
   int _cooldownLeft = 0;
@@ -35,6 +38,15 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   void dispose() {
     _cooldownTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _ensureMinDelay(Stopwatch stopwatch) async {
+    const minDelay = Duration(milliseconds: 400);
+    stopwatch.stop();
+    final remaining = minDelay - stopwatch.elapsed;
+    if (remaining > Duration.zero) {
+      await Future.delayed(remaining);
+    }
   }
 
   Future<bool> _canResendToday() async {
@@ -96,6 +108,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
       _isLoading = true;
       _error = null;
     });
+    final stopwatch = Stopwatch()..start();
     try {
       await _authService.resendSignupEmail(widget.email);
       await _incrementResendCount();
@@ -105,15 +118,47 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
     } catch (_) {
       setState(() => _error = Strings.connectionError);
     } finally {
+      await _ensureMinDelay(stopwatch);
       if (mounted) {
         setState(() => _isLoading = false);
       }
     }
   }
 
+  Future<void> _returnToSignIn() async {
+    if (_isReturning) {
+      return;
+    }
+    setState(() {
+      _isReturning = true;
+      _error = null;
+    });
+    final stopwatch = Stopwatch()..start();
+    try {
+      Navigator.of(context).pop();
+    } finally {
+      await _ensureMinDelay(stopwatch);
+      if (mounted) {
+        setState(() => _isReturning = false);
+      }
+    }
+  }
+
   Future<void> _openMailbox() async {
+    if (_isOpeningMailbox) {
+      return;
+    }
+    setState(() {
+      _isOpeningMailbox = true;
+      _error = null;
+    });
+    final stopwatch = Stopwatch()..start();
     final uri = Uri.parse('mailto:');
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+    await _ensureMinDelay(stopwatch);
+    if (mounted) {
+      setState(() => _isOpeningMailbox = false);
+    }
   }
 
   @override
@@ -125,7 +170,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFFF7F5F2), Color(0xFFE9F1F0)],
+            colors: [Color(0xFFF9F5F0), Color(0xFFEAF3F1)],
           ),
         ),
         child: LayoutBuilder(
@@ -159,10 +204,16 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                       ),
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton(
+                      child: AppPrimaryButton(
                         onPressed:
-                            _isLoading ? null : () => Navigator.of(context).pop(),
-                        child: const Text(Strings.trySignIn),
+                            _isLoading || _isReturning ? null : _returnToSignIn,
+                        child: _isReturning
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Text(Strings.trySignIn),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -170,17 +221,30 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                       width: double.infinity,
                       child: OutlinedButton(
                         onPressed: _isLoading ? null : _resendEmail,
-                        child: Text(
-                          _cooldownLeft > 0
-                              ? '${Strings.resendEmailIn} ${_cooldownLeft}s'
-                              : Strings.resendEmail,
-                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Text(
+                                _cooldownLeft > 0
+                                    ? '${Strings.resendEmailIn} ${_cooldownLeft}s'
+                                    : Strings.resendEmail,
+                              ),
                       ),
                     ),
                     const SizedBox(height: 10),
                     TextButton(
-                      onPressed: _openMailbox,
-                      child: const Text(Strings.openMailbox),
+                      onPressed:
+                          _isOpeningMailbox ? null : _openMailbox,
+                      child: _isOpeningMailbox
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text(Strings.openMailbox),
                     ),
                   ],
                 ),

@@ -3,7 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/auth_service.dart';
 import '../strings.dart';
+import '../widgets/app_buttons.dart';
 import '../widgets/auth_error_message.dart';
+import '../widgets/responsive_layout.dart';
 
 class ResetPasswordPage extends StatefulWidget {
   const ResetPasswordPage({super.key});
@@ -79,35 +81,39 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text(Strings.resetPasswordTitle)),
-      body: Padding(
+      body: ResponsiveLayout(
+        maxWidth: 520,
         padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextField(
-              controller: _newPasswordController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: Strings.resetPassword),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _confirmPasswordController,
-              obscureText: true,
-              decoration:
-                  const InputDecoration(labelText: Strings.confirmPassword),
-            ),
-            const SizedBox(height: 16),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: AuthErrorMessage(_error!),
+        builder: (context, info) {
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              TextField(
+                controller: _newPasswordController,
+                obscureText: true,
+                decoration:
+                    const InputDecoration(labelText: Strings.resetPassword),
               ),
-            ElevatedButton(
-              onPressed: _isLoading ? null : _resetPassword,
-              child: const Text(Strings.savePassword),
-            ),
-          ],
-        ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _confirmPasswordController,
+                obscureText: true,
+                decoration:
+                    const InputDecoration(labelText: Strings.confirmPassword),
+              ),
+              const SizedBox(height: 16),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: AuthErrorMessage(_error!),
+                ),
+              AppPrimaryButton(
+                onPressed: _isLoading ? null : _resetPassword,
+                child: const Text(Strings.savePassword),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

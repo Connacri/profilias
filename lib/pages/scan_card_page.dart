@@ -13,6 +13,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image/image.dart' as img;
 
 import 'cni_camera_page.dart';
+import '../widgets/app_buttons.dart';
 class ScanCardPage extends StatefulWidget {
   const ScanCardPage({super.key});
 
@@ -748,7 +749,7 @@ class _ScanCardPageState extends State<ScanCardPage> {
                         ),
                       ),
                       Expanded(
-                        child: ElevatedButton(
+                        child: AppPrimaryButton(
                           onPressed: () =>
                               Navigator.of(sheetContext).pop(true),
                           child: const Text('Mettre a jour'),
@@ -895,145 +896,157 @@ class _ScanCardPageState extends State<ScanCardPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isCompact = MediaQuery.of(context).size.width < 800;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Scanner une carte'),
       ),
-      body: Stack(
-        children: [
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SegmentedButton<CardType>(
-                  segments: const [
-                    ButtonSegment(value: CardType.cni, label: Text('CNI')),
-                    ButtonSegment(value: CardType.chifa, label: Text('Chifa')),
-                    ButtonSegment(value: CardType.ccp, label: Text('CCP')),
-                  ],
-                  selected: {_type},
-                  onSelectionChanged: (value) {
-                    setState(() => _type = value.first);
-                  },
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 800;
+          return Stack(
+            children: [
+              Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1100),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SegmentedButton<CardType>(
+                          segments: const [
+                            ButtonSegment(value: CardType.cni, label: Text('CNI')),
+                            ButtonSegment(value: CardType.chifa, label: Text('Chifa')),
+                            ButtonSegment(value: CardType.ccp, label: Text('CCP')),
+                          ],
+                          selected: {_type},
+                          onSelectionChanged: (value) {
+                            setState(() => _type = value.first);
+                          },
+                        ),
+                        if (_type == CardType.cni) ...[
+                          const SizedBox(height: 12),
+                          SegmentedButton<CniSide>(
+                            segments: const [
+                              ButtonSegment(value: CniSide.recto, label: Text('Recto')),
+                              ButtonSegment(value: CniSide.verso, label: Text('Verso')),
+                            ],
+                            selected: {_cniSide},
+                            onSelectionChanged: (value) {
+                              setState(() => _cniSide = value.first);
+                            },
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            AppPrimaryButton(
+                              onPressed: _loading ? null : _pickImage,
+                              icon: const Icon(Icons.document_scanner),
+                              child: const Text('Scanner'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: _loading ? null : _rerunOcr,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Relancer OCR'),
+                            ),
+                            if (_type == CardType.cni)
+                              OutlinedButton.icon(
+                                onPressed: _loading
+                                    ? null
+                                    : () => _loadAssetAndRun(
+                                          'assets/image-1770802397842.jpg',
+                                        ),
+                                icon: const Icon(Icons.image),
+                                label: const Text('Test CNI 1'),
+                              ),
+                            if (_type == CardType.cni)
+                              OutlinedButton.icon(
+                                onPressed: _loading
+                                    ? null
+                                    : () => _loadAssetAndRun(
+                                          'assets/image-1770802406616.jpg',
+                                        ),
+                                icon: const Icon(Icons.image_outlined),
+                                label: const Text('Test CNI 2'),
+                              ),
+                            if (_imagePath != null)
+                              Text(
+                                isCompact ? 'Fichier selectionne' : _imagePath ?? '',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                          ],
+                        ),
+                        if (_imagePath != null) ...[
+                          const SizedBox(height: 12),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.file(
+                              File(_imagePath!),
+                              height: 220,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ],
+                        if (_rawText.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          Text('Texte detecte',
+                              style: Theme.of(context).textTheme.titleMedium),
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.surface,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Theme.of(context).dividerColor,
+                              ),
+                            ),
+                            child: Text(_rawText),
+                          ),
+                        ],
+                        const SizedBox(height: 20),
+                        if (_type == CardType.cni) _buildCniForm(),
+                        if (_type == CardType.chifa) _buildChifaForm(),
+                        if (_type == CardType.ccp) _buildCcpForm(),
+                        if (_error != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            _error!,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: double.infinity,
+                          child: AppPrimaryButton(
+                            onPressed: _loading ? null : _save,
+                            child: const Text('Enregistrer dans Supabase'),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    ),
+                  ),
                 ),
-                if (_type == CardType.cni) ...[
-                  const SizedBox(height: 12),
-                  SegmentedButton<CniSide>(
-                    segments: const [
-                      ButtonSegment(value: CniSide.recto, label: Text('Recto')),
-                      ButtonSegment(value: CniSide.verso, label: Text('Verso')),
-                    ],
-                    selected: {_cniSide},
-                    onSelectionChanged: (value) {
-                      setState(() => _cniSide = value.first);
-                    },
-                  ),
-                ],
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: _loading ? null : _pickImage,
-                      icon: const Icon(Icons.document_scanner),
-                      label: const Text('Scanner'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _loading ? null : _rerunOcr,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Relancer OCR'),
-                    ),
-                    if (_type == CardType.cni)
-                      OutlinedButton.icon(
-                        onPressed: _loading
-                            ? null
-                            : () => _loadAssetAndRun(
-                                  'assets/image-1770802397842.jpg',
-                                ),
-                        icon: const Icon(Icons.image),
-                        label: const Text('Test CNI 1'),
-                      ),
-                    if (_type == CardType.cni)
-                      OutlinedButton.icon(
-                        onPressed: _loading
-                            ? null
-                            : () => _loadAssetAndRun(
-                                  'assets/image-1770802406616.jpg',
-                                ),
-                        icon: const Icon(Icons.image_outlined),
-                        label: const Text('Test CNI 2'),
-                      ),
-                    if (_imagePath != null)
-                      Text(
-                        isCompact ? 'Fichier selectionne' : _imagePath ?? '',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                  ],
-                ),
-                if (_imagePath != null) ...[
-                  const SizedBox(height: 12),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(
-                      File(_imagePath!),
-                      height: 220,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ],
-                if (_rawText.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text('Texte detecte',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: Theme.of(context).dividerColor,
-                      ),
-                    ),
-                    child: Text(_rawText),
-                  ),
-                ],
-                const SizedBox(height: 20),
-                if (_type == CardType.cni) _buildCniForm(),
-                if (_type == CardType.chifa) _buildChifaForm(),
-                if (_type == CardType.ccp) _buildCcpForm(),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _error!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _loading ? null : _save,
-                    child: const Text('Enregistrer dans Supabase'),
-                  ),
-                ),
-                const SizedBox(height: 24),
-              ],
-            ),
-          ),
-          if (_loading)
-            const Positioned.fill(
-              child: ColoredBox(
-                color: Color(0x66000000),
-                child: Center(child: CircularProgressIndicator()),
               ),
-            ),
-        ],
+              if (_loading)
+                const Positioned.fill(
+                  child: ColoredBox(
+                    color: Color(0x66000000),
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }

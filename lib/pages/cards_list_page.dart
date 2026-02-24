@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../widgets/responsive_layout.dart';
+import '../widgets/app_buttons.dart';
+
 class CardsListPage extends StatefulWidget {
   const CardsListPage({super.key});
 
@@ -32,71 +35,77 @@ class _CardsListPageState extends State<CardsListPage> {
       appBar: AppBar(
         title: const Text('Mes cartes'),
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                _filterChip('all', 'Toutes'),
-                _filterChip('cni', 'CNI'),
-                _filterChip('chifa', 'Chifa'),
-                _filterChip('ccp', 'CCP'),
-              ],
-            ),
-          ),
-          Expanded(
-            child: FutureBuilder<List<Map<String, dynamic>>>(
-              future: _fetchCards(),
-              key: ValueKey(_refreshToken),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final cards = snapshot.data ?? [];
-                if (cards.isEmpty) {
-                  return const Center(child: Text('Aucune carte.'));
-                }
-                return ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: cards.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final card = cards[index];
-                    final type = (card['type'] ?? '').toString();
-                    final title = _titleFor(card);
-                    final subtitle = _subtitleFor(card);
-                    final imageUrl = card['image_url'] as String?;
-                    return Card(
-                      child: ListTile(
-                        leading: imageUrl != null && imageUrl.isNotEmpty
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.network(
-                                  imageUrl,
-                                  width: 48,
-                                  height: 48,
-                                  fit: BoxFit.cover,
-                                ),
-                              )
-                            : CircleAvatar(
-                                child: Text(type.isNotEmpty
-                                    ? type.substring(0, 1).toUpperCase()
-                                    : '?'),
-                              ),
-                        title: Text(title),
-                        subtitle: Text(subtitle),
-                        onTap: () => _openDetails(card),
-                      ),
+      body: ResponsiveLayout(
+        maxWidth: 1100,
+        padding: EdgeInsets.zero,
+        builder: (context, info) {
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Wrap(
+                  spacing: 8,
+                  children: [
+                    _filterChip('all', 'Toutes'),
+                    _filterChip('cni', 'CNI'),
+                    _filterChip('chifa', 'Chifa'),
+                    _filterChip('ccp', 'CCP'),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: FutureBuilder<List<Map<String, dynamic>>>(
+                  future: _fetchCards(),
+                  key: ValueKey(_refreshToken),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final cards = snapshot.data ?? [];
+                    if (cards.isEmpty) {
+                      return const Center(child: Text('Aucune carte.'));
+                    }
+                    return ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: cards.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final card = cards[index];
+                        final type = (card['type'] ?? '').toString();
+                        final title = _titleFor(card);
+                        final subtitle = _subtitleFor(card);
+                        final imageUrl = card['image_url'] as String?;
+                        return Card(
+                          child: ListTile(
+                            leading: imageUrl != null && imageUrl.isNotEmpty
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.network(
+                                      imageUrl,
+                                      width: 48,
+                                      height: 48,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  )
+                                : CircleAvatar(
+                                    child: Text(type.isNotEmpty
+                                        ? type.substring(0, 1).toUpperCase()
+                                        : '?'),
+                                  ),
+                            title: Text(title),
+                            subtitle: Text(subtitle),
+                            onTap: () => _openDetails(card),
+                          ),
+                        );
+                      },
                     );
                   },
-                );
-              },
-            ),
-          ),
-        ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -230,24 +239,29 @@ class _CardDetailsPage extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView.builder(
+      body: ResponsiveLayout(
+        maxWidth: 900,
         padding: const EdgeInsets.all(16),
-        itemCount: entries.length,
-        itemBuilder: (context, index) {
-          final entry = entries[index];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  entry.key,
-                  style: Theme.of(context).textTheme.labelMedium,
+        builder: (context, info) {
+          return ListView.builder(
+            itemCount: entries.length,
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.key,
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(entry.value.toString()),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                Text(entry.value.toString()),
-              ],
-            ),
+              );
+            },
           );
         },
       ),
@@ -265,7 +279,7 @@ class _CardDetailsPage extends StatelessWidget {
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Annuler'),
           ),
-          ElevatedButton(
+          AppPrimaryButton(
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Supprimer'),
           ),
@@ -315,36 +329,39 @@ class _EditCardPageState extends State<_EditCardPage> {
     final labels = _labelsForType(type);
     return Scaffold(
       appBar: AppBar(title: const Text('Modifier la carte')),
-      body: Padding(
+      body: ResponsiveLayout(
+        maxWidth: 900,
         padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Expanded(
+        builder: (context, info) {
+          return Column(
+            children: [
+              Expanded(
                 child: ListView(
-                children: fields
-                    .map(
-                      (field) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: TextField(
-                          controller: _controllers[field],
-                          decoration: InputDecoration(
-                            labelText: labels[field] ?? field,
+                  children: fields
+                      .map(
+                        (field) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: TextField(
+                            controller: _controllers[field],
+                            decoration: InputDecoration(
+                              labelText: labels[field] ?? field,
+                            ),
                           ),
                         ),
-                      ),
-                    )
-                    .toList(),
+                      )
+                      .toList(),
+                ),
               ),
-            ),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _saving ? null : _save,
-                child: const Text('Enregistrer'),
+              SizedBox(
+                width: double.infinity,
+                child: AppPrimaryButton(
+                  onPressed: _saving ? null : _save,
+                  child: const Text('Enregistrer'),
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }

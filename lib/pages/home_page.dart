@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/auth_service.dart';
 import 'scan_card_page.dart';
 import 'cards_list_page.dart';
+import '../widgets/app_buttons.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.email});
@@ -20,6 +21,7 @@ class _HomePageState extends State<HomePage> {
   late final TextEditingController _displayNameController;
   late final PageController _galleryController;
   int _galleryIndex = 0;
+  bool _isSigningOut = false;
 
   final List<String> _gallery = const [
     'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1200',
@@ -49,7 +51,24 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _signOut() async {
-    await _authService.signOut();
+    if (_isSigningOut) {
+      return;
+    }
+    setState(() => _isSigningOut = true);
+    final stopwatch = Stopwatch()..start();
+    try {
+      await _authService.signOut();
+    } finally {
+      const minDelay = Duration(milliseconds: 400);
+      stopwatch.stop();
+      final remaining = minDelay - stopwatch.elapsed;
+      if (remaining > Duration.zero) {
+        await Future.delayed(remaining);
+      }
+      if (mounted) {
+        setState(() => _isSigningOut = false);
+      }
+    }
   }
 
   @override
@@ -58,7 +77,6 @@ class _HomePageState extends State<HomePage> {
     final fullName =
         (user?.userMetadata?['full_name'] as String?)?.trim() ?? '';
     final displayName = fullName.isNotEmpty ? fullName : 'Profilias User';
-    final isCompact = MediaQuery.of(context).size.width < 720;
     final webClientId = _authService.webClientId;
     final iosClientId = _authService.iosClientId;
     final avatarUrl =
@@ -90,196 +108,214 @@ class _HomePageState extends State<HomePage> {
             icon: const Icon(Icons.list),
             tooltip: 'Mes cartes',
           ),
-          TextButton(onPressed: _signOut, child: const Text('Déconnexion')),
+          TextButton(
+            onPressed: _isSigningOut ? null : _signOut,
+            child: _isSigningOut
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Déconnexion'),
+          ),
         ],
       ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFF7F5F2), Color(0xFFE9F1F0)],
-          ),
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              _ProfileHeader(
-                coverUrl: coverUrl,
-                avatarUrl: avatarUrl,
-                name: displayName,
-                email: widget.email,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 720;
+          return Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFF8F5F0), Color(0xFFE9F3F0)],
               ),
-              Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: isCompact ? 16 : 24,
-                  vertical: 20,
-                ),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 980),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _SectionCard(
-                        title: 'Actions rapides',
-                        child: Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => const ScanCardPage(),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.document_scanner),
-                              label: const Text('Scanner une carte'),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => const CardsListPage(),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.list),
-                              label: const Text('Mes cartes'),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _SectionCard(
-                        title: 'À propos',
-                        child: Text(
-                          'Bienvenue sur votre profil. Personnalisez votre photo, '
-                          'votre couverture et vos informations.',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _SectionCard(
-                        title: 'Galerie',
-                        child: Column(
-                          children: [
-                            AspectRatio(
-                              aspectRatio: isCompact ? 16 / 10 : 16 / 7,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: PageView.builder(
-                                  controller: _galleryController,
-                                  itemCount: _gallery.length,
-                                  onPageChanged: (index) {
-                                    setState(() => _galleryIndex = index);
-                                  },
-                                  itemBuilder: (context, index) {
-                                    return Image.network(
-                                      _gallery[index],
-                                      fit: BoxFit.cover,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  _ProfileHeader(
+                    coverUrl: coverUrl,
+                    avatarUrl: avatarUrl,
+                    name: displayName,
+                    email: widget.email,
+                  ),
+                  Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isCompact ? 16 : 24,
+                      vertical: 20,
+                    ),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 980),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _SectionCard(
+                            title: 'Actions rapides',
+                            child: Wrap(
+                              spacing: 12,
+                              runSpacing: 12,
+                              children: [
+                                AppPrimaryButton(
+                                  onPressed: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => const ScanCardPage(),
+                                      ),
                                     );
                                   },
+                                  icon: const Icon(Icons.document_scanner),
+                                  child: const Text('Scanner une carte'),
                                 ),
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: List.generate(_gallery.length, (index) {
-                                final active = index == _galleryIndex;
-                                return AnimatedContainer(
-                                  duration: const Duration(milliseconds: 200),
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                  ),
-                                  width: active ? 20 : 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: active
-                                        ? Theme.of(context).colorScheme.primary
-                                        : Theme.of(context)
-                                              .colorScheme
-                                              .onSurface
-                                              .withValues(alpha: 0.2),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                );
-                              }),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _SectionCard(
-                        title: 'Préférences',
-                        child: Column(
-                          children: [
-                            TextField(
-                              controller: _displayNameController,
-                              decoration: const InputDecoration(
-                                labelText: 'Nom complet',
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: ElevatedButton(
-                                onPressed: () => _updateDisplayName(
-                                  _displayNameController.text,
+                                OutlinedButton.icon(
+                                  onPressed: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => const CardsListPage(),
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(Icons.list),
+                                  label: const Text('Mes cartes'),
                                 ),
-                                child: const Text('Mettre à jour'),
-                              ),
+                              ],
                             ),
-                            const SizedBox(height: 16),
-                            SwitchListTile(
-                              value: (Supabase.instance.client.auth.currentUser
-                                      ?.userMetadata?['cni_auto_update_opt_out']
-                                      as bool?) ??
-                                  false,
-                              onChanged: (value) async {
-                                final user =
-                                    Supabase.instance.client.auth.currentUser;
-                                if (user == null) return;
-                                await Supabase.instance.client
-                                    .from('profiles')
-                                    .update(
-                                      {'cni_auto_update_opt_out': value},
-                                    )
-                                    .eq('id', user.id);
-                                if (context.mounted) {
-                                  setState(() {});
-                                }
-                              },
-                              title: const Text(
-                                'Ne plus proposer la mise a jour CNI',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (kDebugMode) ...[
-                        const SizedBox(height: 16),
-                        _SectionCard(
-                          title: 'Debug',
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Google Web Client ID: $webClientId'),
-                              if (iosClientId.isNotEmpty)
-                                Text('Google iOS Client ID: $iosClientId'),
-                            ],
                           ),
-                        ),
-                      ],
-                    ],
+                          const SizedBox(height: 16),
+                          _SectionCard(
+                            title: 'À propos',
+                            child: Text(
+                              'Bienvenue sur votre profil. Personnalisez votre photo, '
+                              'votre couverture et vos informations.',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _SectionCard(
+                            title: 'Galerie',
+                            child: Column(
+                              children: [
+                                AspectRatio(
+                                  aspectRatio: isCompact ? 16 / 10 : 16 / 7,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: PageView.builder(
+                                      controller: _galleryController,
+                                      itemCount: _gallery.length,
+                                      onPageChanged: (index) {
+                                        setState(() => _galleryIndex = index);
+                                      },
+                                      itemBuilder: (context, index) {
+                                        return Image.network(
+                                          _gallery[index],
+                                          fit: BoxFit.cover,
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: List.generate(_gallery.length,
+                                      (index) {
+                                    final active = index == _galleryIndex;
+                                    return AnimatedContainer(
+                                      duration:
+                                          const Duration(milliseconds: 200),
+                                      margin: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                      ),
+                                      width: active ? 20 : 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: active
+                                            ? Theme.of(context)
+                                                .colorScheme
+                                                .primary
+                                            : Theme.of(context)
+                                                .colorScheme
+                                                .onSurface
+                                                .withValues(alpha: 0.2),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                    );
+                                  }),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _SectionCard(
+                            title: 'Préférences',
+                            child: Column(
+                              children: [
+                                TextField(
+                                  controller: _displayNameController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Nom complet',
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: AppPrimaryButton(
+                                    onPressed: () => _updateDisplayName(
+                                      _displayNameController.text,
+                                    ),
+                                    child: const Text('Mettre à jour'),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                SwitchListTile(
+                                  value: (Supabase.instance.client.auth.currentUser
+                                          ?.userMetadata?['cni_auto_update_opt_out']
+                                          as bool?) ??
+                                      false,
+                                  onChanged: (value) async {
+                                    final user = Supabase
+                                        .instance.client.auth.currentUser;
+                                    if (user == null) return;
+                                    await Supabase.instance.client
+                                        .from('profiles')
+                                        .update(
+                                          {'cni_auto_update_opt_out': value},
+                                        )
+                                        .eq('id', user.id);
+                                    if (context.mounted) {
+                                      setState(() {});
+                                    }
+                                  },
+                                  title: const Text(
+                                    'Ne plus proposer la mise a jour CNI',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (kDebugMode) ...[
+                            const SizedBox(height: 16),
+                            _SectionCard(
+                              title: 'Debug',
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Google Web Client ID: $webClientId'),
+                                  if (iosClientId.isNotEmpty)
+                                    Text('Google iOS Client ID: $iosClientId'),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
